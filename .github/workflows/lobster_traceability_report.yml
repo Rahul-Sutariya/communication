@@ -25,7 +25,7 @@ on:
 
 jobs:
   lobster-traceability-report:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: write # required to upload release assets
       pull-requests: write # required to comment on PRs
@@ -55,11 +55,11 @@ jobs:
         run: |
           mkdir -p lobster_reports
           
-          # Find and copy lobster HTML reports
-          find -L bazel-bin -path "*/traceability/*" -name "safety_software_unit*_report.html" -exec cp {} lobster_reports/ \;
+          # Find and copy lobster HTML reports (from safety_software_unit and safety_analysis targets)
+          find -L bazel-bin \( -name "safety_software_*_report.html" -o -name "*_safety_analysis_report.html" \) -exec cp {} lobster_reports/ \;
           
           # Find and copy lobster JSON reports
-          find -L bazel-bin -path "*/traceability/*" -name "safety_software_unit*_report.json" -exec cp {} lobster_reports/ \;
+          find -L bazel-bin \( -name "safety_software_*_report.json" -o -name "*_safety_analysis_report.json" \) -exec cp {} lobster_reports/ \;
           
           # List collected reports
           echo "Collected Lobster reports:"
