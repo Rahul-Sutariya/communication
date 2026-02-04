@@ -25,10 +25,18 @@ on:
 
 jobs:
   lobster-traceability-report:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: write # required to upload release assets
       pull-requests: write # required to comment on PRs
+    
+    env:
+      # Define lobster report targets in one place
+      # Add new targets here as needed (space-separated)
+      LOBSTER_TARGETS: >-
+        //third_party/traceability/doc/sample_library:safety_software_unit_example
+        # TODO: Enable full communication module report when ready
+        # "//score/mw/com/requirements:safety_software_unit_com"
 
     steps:
       - name: Checkout Repository
@@ -44,24 +52,19 @@ jobs:
           disk-cache: ${{ github.workflow }}
           repository-cache: true
 
-      - name: Build Lobster Traceability Reports
+      - name: Build and Collect Lobster Reports
         run: |
-          bazel build \
-            //third_party/traceability/doc/sample_library:safety_software_unit_example
-            # TODO: Enable full communication module report when ready
-            # //score/mw/com/requirements:safety_software_unit_com
-
-      - name: Collect Lobster Reports
-        run: |
+          # Build all lobster report targets
+          bazel build $LOBSTER_TARGETS
+          
+          # Collect output files using cquery
           mkdir -p lobster_reports
+          for target in $LOBSTER_TARGETS; do
+            bazel cquery "$target" --output=files 2>/dev/null | while read -r file; do
+              [[ "$file" == *.html || "$file" == *.json ]] && cp "$file" lobster_reports/
+            done
+          done
           
-          # Find and copy lobster HTML reports
-          find -L bazel-bin -path "*/traceability/*" -name "safety_software_unit*_report.html" -exec cp {} lobster_reports/ \;
-          
-          # Find and copy lobster JSON reports
-          find -L bazel-bin -path "*/traceability/*" -name "safety_software_unit*_report.json" -exec cp {} lobster_reports/ \;
-          
-          # List collected reports
           echo "Collected Lobster reports:"
           ls -lh lobster_reports/
 
