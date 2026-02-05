@@ -34,6 +34,7 @@ jobs:
       # Define lobster report targets in one place
       # Add new targets here as needed (space-separated)
       # TODO: Enable full communication module report when ready
+      
       # //score/mw/com/requirements:safety_software_unit_com
       LOBSTER_TARGETS: >-
         //third_party/traceability/doc/sample_library:safety_software_unit_example
