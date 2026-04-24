@@ -23,6 +23,8 @@ py_binary(
         "//third_party/sphinx_rtd_theme",
         "@score_tooling//bazel/rules/rules_score:bazel_sphinx_needs",
         "@score_tooling//bazel/rules/rules_score:sphinx_module_ext",
+        "@score_tooling//plantuml/sphinx/clickable_plantuml",
+        "@trlc//tools/sphinx/extensions/trlc",
     ],
 )
 

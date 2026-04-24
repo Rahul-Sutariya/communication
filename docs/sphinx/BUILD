@@ -16,6 +16,7 @@ load("@rules_python//sphinxdocs:sphinx.bzl", "sphinx_build_binary", "sphinx_docs
 load("@rules_python//sphinxdocs:sphinx_docs_library.bzl", "sphinx_docs_library")
 load(
     "@score_tooling//bazel/rules/rules_score:rules_score.bzl",
+    "filter_execpath",
     "sphinx_module",
 )
 load("//docs/sphinx/utils:defs.bzl", "generate_api_rst")
@@ -98,6 +99,13 @@ sphinx_docs(
     ],
 )
 
+filter_execpath(
+    name = "breathe_doxygen_xml",
+    filter_pattern = "doxygen_build/xml",
+    flag = "-Dbreathe_projects.doxygen_build",
+    target = "//docs/sphinx:doxygen_xml",
+)
+
 sphinx_module(
     name = "sphinx_doc",
     srcs =
@@ -106,8 +114,23 @@ sphinx_module(
             "index.rst",
             "introduction.rst",
             "message_passing.rst",
-            "//score/mw/com:readme_md",
+            "safety_reports.rst",
+            ":doxygen_xml",
+            ":generate_api_rst",
+            ":static_assets",
         ],
+    docs_library_deps = [
+        "//score/mw/com:readme_md",
+    ],
+    extra_opts = [
+        "-Dbreathe_default_project=doxygen_build",
+    ],
+    extra_opts_targets = [
+        # Pass location of Doxygen XML output to Breathe via -D option
+        ":breathe_doxygen_xml",
+    ],
     index = "index.rst",
     visibility = ["//visibility:public"],
+    deps = [
+    ],
 )
