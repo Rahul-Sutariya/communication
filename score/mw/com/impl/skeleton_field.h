@@ -125,7 +125,7 @@ class SkeletonField : public SkeletonFieldBase
         static_assert(std::is_invocable_v<CallableType, FieldType&>,
                       "RegisterSetHandler: handler must be callable as void(FieldType& value). "
                       "The argument initially holds the proxy-requested value and may be modified in-place.");
-        set_handler_ = std::move(handler);
+        set_handler_ = std::forward<CallableType>(handler);
 
         auto wrapped_callback = [this](FieldType& new_value) -> FieldType {
             // Allow user to validate/modify the value in-place
