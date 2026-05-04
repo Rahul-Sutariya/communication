@@ -10,19 +10,15 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 # *******************************************************************************
-load("@score_tooling//bazel/rules/rules_score:rules_score.bzl", "dependable_element")
+load("@score_tooling//bazel/rules/rules_score:rules_score.bzl", "component")
 
-dependable_element(
-    name = "mw_com",
-    architectural_design = ["//score/mw/com/dependability/software_architectural_design"],
-    assumptions_of_use = [],
+component(
+    name = "bindings",
     components = [
-        "//score/mw/com/impl:frontend_component",
-        "//score/mw/com/impl/bindings",
+        "//score/mw/com/impl/bindings/lola:lola_component",
+        "//score/mw/com/impl/bindings/mock_binding:mock_component",
     ],
-    dependability_analysis = [],
-    integrity_level = "B",
-    maturity = "development",
     requirements = [],
     tests = [],
+    visibility = ["//score/mw/com/dependability:__pkg__"],
 )
