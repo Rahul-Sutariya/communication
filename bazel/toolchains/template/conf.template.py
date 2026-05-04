@@ -35,7 +35,18 @@ extensions = [
     "sphinx_design",
     "myst_parser",
     "sphinxcontrib.plantuml",
+    "breathe",
+    "trlc",
 ]
+
+# -- Breathe configuration --
+# Breathe projects can be set via extra_opts using Sphinx -D dot notation:
+#   -Dbreathe_projects.project_name=path/to/doxygen/xml
+breathe_projects = {}
+breathe_default_project = ""
+breathe_default_members = ('members',)
+breathe_show_define_initializer = True
+breathe_show_enumvalue_initializer = True
 
 # MyST parser extensions
 myst_enable_extensions = ["colon_fence"]
@@ -105,3 +116,4 @@ bazel_sphinx_needs.log_config_info(project)
 
 def setup(app):
     return bazel_sphinx_needs.setup_sphinx_extension(app, needs_external_needs)
+
