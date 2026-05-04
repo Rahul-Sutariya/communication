@@ -10,3 +10,17 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 # *******************************************************************************
+load("@score_tooling//bazel/rules/rules_score:rules_score.bzl", "dependable_element")
+
+dependable_element(
+    name = "dependable_element",
+    architectural_design = ["//score/mw/com/dependability/software_architectural_design"],
+    assumptions_of_use = [],
+    components = [],
+    dependability_analysis = [],
+    integrity_level = "B",
+    maturity = "development",
+    requirements = [],
+    tags = ["manual"],
+    tests = [],
+)
