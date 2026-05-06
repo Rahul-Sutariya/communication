@@ -13,7 +13,44 @@
 
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("@score_baselibs//:bazel/unit_tests.bzl", "cc_gtest_unit_test", "cc_unit_test", "cc_unit_test_suites_for_host_and_qnx")
+load("@score_tooling//bazel/rules/rules_score:rules_score.bzl", "component", "unit")
 load("//score/mw:common_features.bzl", "COMPILER_WARNING_FEATURES")
+
+component(
+    name = "frontend_component",
+    components = [
+        ":frontend_sd",
+        ":frontend_skeleton",
+        ":frontend_proxy",
+    ],
+    requirements = [],
+    tests = [],
+    visibility = ["//score/mw/com/dependability:__pkg__"],
+)
+
+unit(
+    name = "frontend_sd",
+    scope = [],
+    tests = [],
+    unit_design = [],
+    implementation = [],
+)
+
+unit(
+    name = "frontend_skeleton",
+    scope = [],
+    tests = [],
+    unit_design = [],
+    implementation = [],
+)
+
+unit(
+    name = "frontend_proxy",
+    scope = [],
+    tests = [],
+    unit_design = [],
+    implementation = [],
+)
 
 package(default_visibility = [
     "//score/mw/com/impl:__subpackages__",
