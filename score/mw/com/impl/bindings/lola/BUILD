@@ -509,6 +509,8 @@ cc_library(
         ":transaction_log_set",
         "//score/mw/com/impl:runtime",
         "//score/mw/com/impl:scoped_event_receive_handler",
+        "//score/mw/com/impl:subscription_state",
+        "//score/mw/com/impl:subscription_state_change_handler",
         "//score/mw/com/impl/bindings/lola/messaging:i_message_passing_service",
     ],
 )
