@@ -134,7 +134,7 @@ class ProxyEventBase
      * \brief Unsets/Unregisters a SubscriptionStateChangeHandler for this event. After this method returns, it is
      *        guaranteed, that the previously registered handler is neither active nor will be called anymore.
      */
-    Result<void> UnSetSubscriptionStateChangeHandler() noexcept;
+    Result<void> UnsetSubscriptionStateChangeHandler() noexcept;
 
     /**
      * \api

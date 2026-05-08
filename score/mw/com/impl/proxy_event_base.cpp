@@ -177,7 +177,7 @@ Result<void> ProxyEventBase::SetSubscriptionStateChangeHandler(SubscriptionState
     return {};
 }
 
-Result<void> ProxyEventBase::UnSetSubscriptionStateChangeHandler() noexcept
+Result<void> ProxyEventBase::UnsetSubscriptionStateChangeHandler() noexcept
 {
     binding_base_->UnsetSubscriptionStateChangeHandler();
     return {};

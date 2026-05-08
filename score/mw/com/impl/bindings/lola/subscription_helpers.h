@@ -88,7 +88,7 @@ std::string CreateLoggingString(std::string&& string,
                                 const ElementFqId& element_fq_id,
                                 const SubscriptionStateMachineState current_state);
 
-SubscriptionState SubscriptionStateMachineState2SubscriptionState(SubscriptionStateMachineState state) noexcept;
+SubscriptionState SubscriptionStateMachineStateToSubscriptionState(SubscriptionStateMachineState state) noexcept;
 
 }  // namespace score::mw::com::impl::lola
 

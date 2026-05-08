@@ -100,12 +100,12 @@ class ProxyFieldBase
 
     /**
      * \api
-     * \brief Unsets/Unregisters a SubscriptionStateChangeHandler for this event. After this method returns, it is
+     * \brief Unsets/Unregisters a SubscriptionStateChangeHandler for this field. After this method returns, it is
      *        guaranteed, that the previously registered handler is neither active nor will be called anymore.
      */
-    Result<void> UnSetSubscriptionStateChangeHandler() noexcept
+    Result<void> UnsetSubscriptionStateChangeHandler() noexcept
     {
-        return proxy_event_base_dispatch_->UnSetSubscriptionStateChangeHandler();
+        return proxy_event_base_dispatch_->UnsetSubscriptionStateChangeHandler();
     }
 
     /**

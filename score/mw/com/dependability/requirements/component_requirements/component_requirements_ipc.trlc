@@ -2365,7 +2365,7 @@ section "com" {
 
         /* broken_link_c/issue/21466236 */
         ScoreReq.CompReq BehaviourOfUnsetSubscriptionStateChangeHandler {
-            description = '''{{UnsetSubscriptionStateChangeHandler}} {{UnsetSubscriptionStateChangeHandler}}{{SubscriptionStateChangeHandler}}will unregister the {{SubscriptionStateChangeHandler}} (See SubscriptionStateChangeHandler) that was registered by the class instance with a call to {{SetSubscriptionStateChangeHandler}} After calling  the  will no longer be triggered when the {{SubscriptionState}} (See progress-cursor SubscriptionState changes.
+            description = '''{{UnsetSubscriptionStateChangeHandler}} will unregister the {{SubscriptionStateChangeHandler}} (See SubscriptionStateChangeHandler) that was registered by the class instance with a call to {{SetSubscriptionStateChangeHandler}} After calling  the  will no longer be triggered when the {{SubscriptionState}} (See progress-cursor SubscriptionState changes.
 
             {{UnsetSubscriptionStateChangeHandler}} shall fulfill the following requirement: Explicit Lifetime ending by API calls.'''
             safety = ScoreReq.Asil.B

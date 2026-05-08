@@ -64,7 +64,7 @@ void ProxyEventCommon::Unsubscribe()
 SubscriptionState ProxyEventCommon::GetSubscriptionState() const noexcept
 {
     const auto current_state = subscription_event_state_machine_.GetCurrentState();
-    return SubscriptionStateMachineState2SubscriptionState(current_state);
+    return SubscriptionStateMachineStateToSubscriptionState(current_state);
 }
 
 Result<std::size_t> ProxyEventCommon::GetNumNewSamplesAvailable() const noexcept

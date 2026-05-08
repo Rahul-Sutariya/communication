@@ -57,7 +57,7 @@ void EventReceiveHandlerManager::Unregister() noexcept
     }
 }
 
-SubscriptionState SubscriptionStateMachineState2SubscriptionState(SubscriptionStateMachineState state) noexcept
+SubscriptionState SubscriptionStateMachineStateToSubscriptionState(SubscriptionStateMachineState state) noexcept
 {
     switch (state)
     {
