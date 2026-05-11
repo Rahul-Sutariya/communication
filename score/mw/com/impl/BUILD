@@ -484,7 +484,7 @@ cc_library(
     tags = ["FFI"],
     visibility = [
         "//score/mw/com:__pkg__",
-        "//score/mw/com/impl/mocking:__pkg__",
+        "//score/mw/com/impl:__subpackages__",
     ],
 )
 
@@ -585,6 +585,7 @@ cc_library(
         ":sample_reference_tracker",
         ":scoped_event_receive_handler",
         ":subscription_state",
+        ":subscription_state_change_handler",
         "//score/mw/com/impl/configuration",
         "//score/mw/com/impl/plumbing:sample_ptr",
         "//score/mw/com/impl/tracing:i_tracing_runtime",
@@ -832,6 +833,21 @@ cc_library(
         "//score/mw/com:__subpackages__",
     ],
     deps = ["@score_baselibs//score/language/futurecpp"],
+)
+
+cc_library(
+    name = "subscription_state_change_handler",
+    srcs = ["subscription_state_change_handler.cpp"],
+    hdrs = ["subscription_state_change_handler.h"],
+    features = COMPILER_WARNING_FEATURES,
+    tags = ["FFI"],
+    visibility = [
+        "//score/mw/com:__subpackages__",
+    ],
+    deps = [
+        ":subscription_state",
+        "@score_baselibs//score/language/futurecpp",
+    ],
 )
 
 cc_library(
