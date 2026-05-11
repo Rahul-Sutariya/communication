@@ -66,6 +66,8 @@ common:qnx_arm64 --extra_toolchains=@score_toolchains_rust//toolchains/ferrocene
 common:qnx_arm64 --credential_helper=*.qnx.com=%workspace%/third_party/qnx_credential_helper.py
 common:qnx_arm64 --sandbox_writable_path=/var/tmp
 
+common:qnx --config=qnx_x86_64
+
 # unshare /dev/shm and /tmp
 test --sandbox_tmpfs_path=/dev/shm
 test --sandbox_tmpfs_path=/tmp
