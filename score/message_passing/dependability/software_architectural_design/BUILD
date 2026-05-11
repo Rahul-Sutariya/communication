@@ -1,5 +1,5 @@
 # *******************************************************************************
-# Copyright (c) 2024 Contributors to the Eclipse Foundation
+# Copyright (c) 2026 Contributors to the Eclipse Foundation
 #
 # See the NOTICE file(s) distributed with this work for additional
 # information regarding copyright ownership.
@@ -13,19 +13,15 @@
 
 load(
     "@score_tooling//bazel/rules/rules_score:rules_score.bzl",
-    "component_requirements",
+    "architectural_design",
 )
 
-component_requirements(
-    name = "component_requirements_ipc",
-    srcs = [
-        "component_requirements_ipc.trlc",
-        "component_requirements_ipc_methods.trlc",
+architectural_design(
+    name = "message_passing_architectural_design",
+    static = [
+        "static_design.puml",
+        "client-server.md",
     ],
     target_compatible_with = ["@platforms//os:linux"],
-    visibility = ["//visibility:public"],
-    deps = [
-        "//score/mw/com/dependability/requirements/assumed_system_requirements",
-        "//score/mw/com/dependability/requirements/feature_requirements:feature_requirements_ipc",
-    ],
+    visibility = ["//score/message_passing/dependability:__subpackages__"],
 )

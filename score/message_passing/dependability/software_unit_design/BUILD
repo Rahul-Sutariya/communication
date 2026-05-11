@@ -1,5 +1,5 @@
 # *******************************************************************************
-# Copyright (c) 2024 Contributors to the Eclipse Foundation
+# Copyright (c) 2026 Contributors to the Eclipse Foundation
 #
 # See the NOTICE file(s) distributed with this work for additional
 # information regarding copyright ownership.
@@ -11,15 +11,19 @@
 # SPDX-License-Identifier: Apache-2.0
 # *******************************************************************************
 
-load(
-    "@score_tooling//bazel/rules/rules_score:rules_score.bzl",
-    "feature_requirements",
+load("@score_tooling//bazel/rules/rules_score:rules_score.bzl", "unit_design")
+
+unit_design(
+    name = "client_connection_unit_design",
+    visibility = ["//score/message_passing:__pkg__"],
 )
 
-feature_requirements(
-    name = "feature_requirements_ipc",
-    srcs = ["feature_requirements_ipc.trlc"],
-    target_compatible_with = ["@platforms//os:linux"],
-    visibility = ["//visibility:public"],
-    deps = ["//score/mw/com/dependability/requirements/assumed_system_requirements"],
+unit_design(
+    name = "unix_domain_unit_design",
+    visibility = ["//score/message_passing:__pkg__"],
+)
+
+unit_design(
+    name = "qnx_dispatch_unit_design",
+    visibility = ["//score/message_passing:__pkg__"],
 )

@@ -49,6 +49,7 @@ filter_execpath(
 # Build Sphinx documentation
 sphinx_module(
     name = "sphinx_doc",
+    testonly = True,
     srcs =
         [
             "how_to_document.rst",
@@ -75,5 +76,6 @@ sphinx_module(
     target_compatible_with = ["@platforms//os:linux"],
     visibility = ["//visibility:public"],
     deps = [
+        "//score/message_passing/dependability:dependable_element_message_passing_doc",
     ],
 )

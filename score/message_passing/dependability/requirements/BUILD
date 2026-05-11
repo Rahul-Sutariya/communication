@@ -1,5 +1,5 @@
 # *******************************************************************************
-# Copyright (c) 2024 Contributors to the Eclipse Foundation
+# Copyright (c) 2026 Contributors to the Eclipse Foundation
 #
 # See the NOTICE file(s) distributed with this work for additional
 # information regarding copyright ownership.
@@ -14,18 +14,24 @@
 load(
     "@score_tooling//bazel/rules/rules_score:rules_score.bzl",
     "component_requirements",
+    "feature_requirements",
+)
+
+feature_requirements(
+    name = "feature_requirements",
+    srcs = ["feature_requirements.trlc"],
+    target_compatible_with = ["@platforms//os:linux"],
+    visibility = ["//score/message_passing/dependability:__subpackages__"],
+    deps = ["//score/message_passing/dependability/assumed_system:assumed_system_requirements"],
 )
 
 component_requirements(
-    name = "component_requirements_ipc",
-    srcs = [
-        "component_requirements_ipc.trlc",
-        "component_requirements_ipc_methods.trlc",
-    ],
+    name = "component_requirements",
+    srcs = ["component_requirements.trlc"],
     target_compatible_with = ["@platforms//os:linux"],
-    visibility = ["//visibility:public"],
+    visibility = ["//score/message_passing/dependability:__subpackages__"],
     deps = [
-        "//score/mw/com/dependability/requirements/assumed_system_requirements",
-        "//score/mw/com/dependability/requirements/feature_requirements:feature_requirements_ipc",
+        ":feature_requirements",
+        "//score/message_passing/dependability/assumed_system:assumed_system_requirements",
     ],
 )
