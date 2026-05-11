@@ -20,7 +20,7 @@ dependable_element(
         "//score/mw/com/impl:frontend_component",
         "//score/mw/com/impl/bindings",
     ],
-    dependability_analysis = [],
+    dependability_analysis = ["//score/mw/com/dependability/safety_analysis:mw_com_fmea"],
     integrity_level = "B",
     maturity = "development",
     requirements = [],
