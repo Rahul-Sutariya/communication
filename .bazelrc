@@ -75,8 +75,10 @@ test --sandbox_tmpfs_path=/tmp
 # Tests require to be run in a sandbox. Otherwise some will be flaky.
 test --nosandbox_default_allow_network
 
+# Bzlmod
 common --registry=https://raw.githubusercontent.com/eclipse-score/bazel_registry/refs/heads/main/
 common --registry=https://bcr.bazel.build
+common --check_direct_dependencies=error # Issue an error if a direct dependency version does not match with what is written in MODULE.bazel
 
 # Enable colored output for gtest
 build --test_env="GTEST_COLOR=1"
