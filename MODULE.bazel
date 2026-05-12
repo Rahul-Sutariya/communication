@@ -23,7 +23,16 @@ bazel_dep(name = "platforms", version = "1.0.0")
 bazel_dep(name = "rules_cc", version = "0.2.17")
 bazel_dep(name = "rules_python", version = "1.8.5")
 bazel_dep(name = "rules_rust", version = "0.68.1-score")
+
+# Patch baselibs with a QNX8 workaround for poll
+# until a fix is provided by the QNX SDP
 bazel_dep(name = "score_baselibs", version = "0.2.7")
+single_version_override(
+    module_name = "score_baselibs",
+    patch_strip = 1,
+    patches = ["//third_party/score_baselibs:restore_qnx8_poll_workaround.patch"],
+)
+
 bazel_dep(name = "score_baselibs_rust", version = "0.1.0")
 bazel_dep(name = "score_bazel_platforms", version = "0.1.2")
 bazel_dep(name = "score_crates", version = "0.0.9", repo_name = "score_communication_crate_index")
