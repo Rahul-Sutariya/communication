@@ -73,11 +73,6 @@ gcc_toolchains.toolchain(
 use_repo(gcc_toolchains, "gcc_toolchain_x86_64")
 
 bazel_dep(name = "score_bazel_cpp_toolchains", version = "0.5.1", dev_dependency = True)
-git_override(
-    module_name = "score_bazel_cpp_toolchains",
-    commit = "30d9f4151db55af066e5bbf8a0a3672469ec0293",
-    remote = "https://github.com/eclipse-score/bazel_cpp_toolchains.git",
-)
 
 score_gcc = use_extension("@score_bazel_cpp_toolchains//extensions:gcc.bzl", "gcc", dev_dependency = True)
 score_gcc.toolchain(
