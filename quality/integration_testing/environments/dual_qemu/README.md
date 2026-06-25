@@ -96,14 +96,25 @@ and wires everything for you.
 
 ## Simple C++ example
 
-[`example/`](example) contains the smallest possible cross-VM demo:
+[`example/`](example) contains the smallest possible cross-VM **data-plane** demo. It
+shows the property that makes the LoLa data plane work across VMs: a pointer stored
+*inside* the shared region must resolve on the other VM even though each VM maps the
+region at a **different** virtual base address. Instead of a flat string, the example
+stores a singly-linked list whose links are self-relative byte offsets — *offset pointers*,
+just like `score::memory::shared::OffsetPtr`. A raw `T*` could not survive the trip; an
+offset pointer can.
 
-- [`example/simple_ivshmem.cpp`](example/simple_ivshmem.cpp) — one C++ binary that either
-  `--write`s a string into the shared `ivshmem` region or `--read`s it back. On QNX it
-  reaches the region through `pci-server` (the default, `--pci`) by mapping the ivshmem
-  device's shared-memory BAR directly — no `/dev/ivshmem0` driver needed. No mw::com involved.
-- [`example/simple_ivshmem_test.py`](example/simple_ivshmem_test.py) — runs the writer on
-  `target_a` (VM-A) and the reader on `target_b` (VM-B).
+- [`example/simple_ivshmem.cpp`](example/simple_ivshmem.cpp) — one C++ binary. In a single
+  run each VM writes an offset-pointer linked list into its own slot and then reads +
+  verifies the *peer's* slot by walking the offset pointers. The region has two slots:
+  `slot[0]` for VM-A (`--id A`) and `slot[1]` for VM-B (`--id B`). Because the read phase
+  waits for the peer, the two VMs must run concurrently (you can still split the phases
+  with `--write` / `--read` to run them by hand). On QNX it reaches the region through
+  `pci-server` (the default, `--pci`) by mapping the ivshmem device's shared-memory BAR
+  directly — no `/dev/ivshmem0` driver needed. No mw::com involved.
+- [`example/simple_ivshmem_test.py`](example/simple_ivshmem_test.py) — launches the two
+  single-run commands concurrently (one per VM) so they rendezvous, and asserts both VMs
+  verify the other's list.
 - [`example/BUILD`](example/BUILD) — builds the binary, packages it, and runs it via
   `dual_qemu_integration_test`.
 
@@ -117,14 +128,20 @@ bazel test //quality/integration_testing/environments/dual_qemu/example:test_sim
     --test_output=streamed
 ```
 
-You will see both results, for example:
+Each VM prints its write and read lines, for example:
 
 ```text
-[VM-A] VM-A wrote 19 bytes: "HELLO_FROM_VM_A BMW" (rc=0)
-[VM-B] VM-B read 19 bytes: "HELLO_FROM_VM_A BMW" (rc=0)
+[VM-A] VM-A wrote 8-node offset-pointer list into slot 0 (region mapped at 0x...)
+VM-A reading peer slot 1 (region mapped at 0x...): 8192 8193 ...
+VM-A verified 8 nodes via offset pointers OK (rc=0)
+[VM-B] VM-B wrote 8-node offset-pointer list into slot 1 (region mapped at 0x...)
+VM-B reading peer slot 0 (region mapped at 0x...): 4096 4097 ...
+VM-B verified 8 nodes via offset pointers OK (rc=0)
 ```
 
-The test then asserts VM-B read back exactly what VM-A wrote.
+The two `region mapped at` addresses differ between the VMs, which is exactly why the test
+is meaningful: each VM resolves the *other* VM's linked list correctly despite the
+different base. The test asserts both VMs report `verified`.
 
 > Note: on QNX the example maps the ivshmem PCI device's shared-memory BAR via `pci-server`
 > (`--pci`), so it needs no `/dev/ivshmem0` guest driver. The same C++ logic can be
@@ -155,13 +172,14 @@ hand so you can SSH in and drive the example yourself.
    ssh -p 2223 root@localhost      # VM-B
    ```
 
-4. Write from VM-A and read it back on VM-B:
+4. Each VM writes its own offset-pointer list and reads + verifies the peer's in a single
+   run. Start both roughly together (each one waits for the other):
 
    ```bash
    # on VM-A:
-   /opt/simple_ivshmem/bin/simple_ivshmem --write "HELLO_FROM_VM_A" --pci
+   /opt/simple_ivshmem/bin/simple_ivshmem --id A --pci
    # on VM-B:
-   /opt/simple_ivshmem/bin/simple_ivshmem --read --pci
+   /opt/simple_ivshmem/bin/simple_ivshmem --id B --pci
    ```
 
 5. Stop the VMs:

@@ -11,16 +11,29 @@
  * SPDX-License-Identifier: Apache-2.0
  ********************************************************************************/
 
-// The simplest possible cross-VM shared-memory example.
+// The simplest possible cross-VM shared-memory DATA-PLANE example.
 //
-//   simple_ivshmem --write "hello"   // run on VM-A: publishes a string
-//   simple_ivshmem --read            // run on VM-B: reads it back
+//   simple_ivshmem --id A    // VM-A: writes its own list, then reads + verifies VM-B's
+//   simple_ivshmem --id B    // VM-B: writes its own list, then reads + verifies VM-A's
 //
-// Both invocations map the SAME shared region: the QEMU ivshmem-plain PCI device that
-// both VMs back with one host file. VM-A stores a string and then publishes a "magic"
-// marker with a release store; VM-B waits for that marker with an acquire load and
-// prints the string. No mw::com / LoLa types are involved -- this only demonstrates the
-// raw shared-memory data plane between the two VMs.
+// By default each VM does BOTH in a single run: it writes an offset-pointer linked list
+// into its own slot and then waits for the peer's slot to appear and verifies it. The two
+// VMs therefore rendezvous, so they must run concurrently (each one waits for the other).
+// You can still split the phases with --write / --read if you prefer to run them by hand:
+//
+//   simple_ivshmem --id A --write    // only write slot A
+//   simple_ivshmem --id B --read     // only read + verify slot A (peer of B)
+//
+// Both VMs map the SAME shared region (the QEMU ivshmem-plain PCI device that both VMs
+// back with one host file) but, crucially, at DIFFERENT virtual base addresses. The whole
+// point of this example is the LoLa data-plane property: a pointer stored INSIDE the shared
+// region must resolve on the other VM despite that different base. A raw `T*` cannot do
+// this -- it is only valid in the writer's address space. So instead of a flat string we
+// store a singly-linked list whose links are self-relative byte offsets ("offset pointers",
+// exactly like score::memory::shared::OffsetPtr). Each VM writes its OWN slot and reads the
+// PEER slot, then walks the list purely through offset pointers and verifies the values.
+// Each run prints the base address it mapped the region at, so the logs show the two VMs
+// resolving the same data structure from different bases.
 //
 // How the region is reached:
 //   * On QNX (the default, --pci) the program talks to pci-server, finds the ivshmem
@@ -33,10 +46,9 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
+#include <ctime>
 #include <string>
 
 #if defined(__QNXNTO__)
@@ -50,16 +62,136 @@ extern "C" {
 
 namespace
 {
-constexpr std::size_t kMapSize = 4096U;        // we only need the first page of the region
-constexpr std::uint32_t kMagic = 0x53484D31U;  // "SHM1": set by the writer once data is ready
+constexpr std::size_t kMapSize = 4096U;        // one page is plenty for the small layout below
+constexpr std::uint32_t kMagic = 0x53484D31U;  // "SHM1": published once a slot is fully written
+constexpr std::uint32_t kNodeCount = 8U;       // nodes per linked list
+constexpr std::uint32_t kBaseValue[2] = {0x1000U, 0x2000U};  // per-VM base so values are distinguishable
 
-// Layout placed at the very start of the shared region. Both VMs agree on it.
-struct SharedBlock
+// A node of a singly-linked list that lives ENTIRELY inside the shared region. The link is
+// not a raw `Node*` (that would be a VM-local address, invalid on the other VM) but a
+// self-relative byte offset -- an offset pointer, just like score::memory::shared::OffsetPtr.
+struct Node
 {
-    std::uint32_t magic;
-    std::uint32_t length;
-    char data[256];
+    std::uint32_t value;
+    std::int64_t next_off;  // offset from &next_off to the next Node; 0 marks the end of the list
 };
+
+// One slot per VM. The owning VM writes its slot; the reader on the OTHER VM walks it.
+struct Slot
+{
+    std::uint32_t magic;       // published LAST with a release store once the list is complete
+    std::uint32_t node_count;  // number of nodes in the list
+    std::int64_t head_off;     // offset from &head_off to the first Node (an offset pointer)
+    Node nodes[kNodeCount];    // node storage, also inside the shared region
+};
+
+// The whole shared region: slot[0] belongs to VM-A, slot[1] to VM-B. Both VMs agree on it.
+struct Region
+{
+    Slot slot[2];
+};
+
+// Store a self-relative offset: the byte distance from the offset field itself to `target`
+// (or 0 for a null offset pointer). This is exactly how an offset pointer works, and it is
+// what lets a pointer stored in shared memory resolve correctly even though VM-A and VM-B
+// map the region at different virtual base addresses.
+void StoreOffset(std::int64_t& field, const void* target)
+{
+    field = (target == nullptr)
+                ? 0
+                : reinterpret_cast<const std::uint8_t*>(target) - reinterpret_cast<std::uint8_t*>(&field);
+}
+
+// Resolve an offset pointer back into a usable address in THIS process's mapping.
+void* LoadOffset(const std::int64_t& field)
+{
+    if (field == 0)
+    {
+        return nullptr;  // null offset pointer (end of list)
+    }
+    const std::uint8_t* const base = reinterpret_cast<const std::uint8_t*>(&field);
+    return const_cast<std::uint8_t*>(base) + field;
+}
+
+// Wait (up to timeout_ms) until the peer publishes its slot, i.e. its magic becomes kMagic.
+// Returns true if the magic was observed. This lets both VMs run as a single concurrent
+// write-then-read without a strict start order: whichever VM gets to the read phase first
+// simply waits for the other to publish.
+bool WaitForMagic(const std::uint32_t& magic, std::uint32_t timeout_ms)
+{
+    constexpr std::uint32_t kStepMs = 20U;
+    for (std::uint32_t waited = 0U;; waited += kStepMs)
+    {
+        if (__atomic_load_n(&magic, __ATOMIC_ACQUIRE) == kMagic)
+        {
+            return true;
+        }
+        if (waited >= timeout_ms)
+        {
+            return false;
+        }
+        const struct timespec ts{0, static_cast<long>(kStepMs) * 1000000L};
+        (void)::nanosleep(&ts, nullptr);
+    }
+}
+
+// Build this VM's linked list inside its own slot and publish it. Every node and every link
+// lives in the shared region, and the links are offset pointers, so the peer can walk the
+// list at its own mapping base.
+void WriteOwnSlot(Region& region, int id, const char* name, const void* base)
+{
+    Slot& slot = region.slot[id];
+    for (std::uint32_t i = 0; i < kNodeCount; ++i)
+    {
+        slot.nodes[i].value = kBaseValue[id] + i;
+        StoreOffset(slot.nodes[i].next_off, (i + 1U < kNodeCount) ? &slot.nodes[i + 1U] : nullptr);
+    }
+    slot.node_count = kNodeCount;
+    StoreOffset(slot.head_off, &slot.nodes[0]);
+    // Release store: makes the nodes + offsets above visible to a peer that reads the magic
+    // with an acquire load.
+    __atomic_store_n(&slot.magic, kMagic, __ATOMIC_RELEASE);
+    std::printf("%s wrote %u-node offset-pointer list into slot %d (region mapped at %p)\n",
+                name, kNodeCount, id, base);
+}
+
+// Wait for the peer to publish its slot, then walk its list through offset pointers and
+// verify the values. Returns a process exit code (0 = OK).
+int ReadPeerSlot(Region& region, int id, const char* name, const void* base)
+{
+    const int peer = 1 - id;
+    Slot& slot = region.slot[peer];
+
+    constexpr std::uint32_t kWaitMs = 15000U;
+    if (!WaitForMagic(slot.magic, kWaitMs))
+    {
+        std::fprintf(stderr, "%s: peer slot %d not published within %ums\n", name, peer, kWaitMs);
+        return 3;
+    }
+
+    // Because head_off/next_off are self-relative, this resolves correctly even though we
+    // mapped the region at a DIFFERENT base than the writer did.
+    std::printf("%s reading peer slot %d (region mapped at %p):", name, peer, base);
+    std::uint32_t seen = 0U;
+    bool ok = true;
+    for (auto* node = static_cast<Node*>(LoadOffset(slot.head_off));
+         node != nullptr && seen <= kNodeCount;  // the bound also guards against a cyclic list
+         node = static_cast<Node*>(LoadOffset(node->next_off)))
+    {
+        std::printf(" %u", node->value);
+        ok = ok && (node->value == kBaseValue[peer] + seen);
+        ++seen;
+    }
+    std::printf("\n");
+
+    if (!ok || seen != slot.node_count)
+    {
+        std::fprintf(stderr, "%s: list verification FAILED (seen=%u, node_count=%u)\n", name, seen, slot.node_count);
+        return 4;
+    }
+    std::printf("%s verified %u nodes via offset pointers OK\n", name, seen);
+    return 0;
+}
 
 // A mapped view of the shared region plus the bookkeeping needed to release it.
 struct Mapping
@@ -224,108 +356,120 @@ bool MapFromPci(Mapping& out)
     return true;
 }
 #endif  // __QNXNTO__
+
+// Maps the shared region: via the QNX ivshmem PCI device (--pci) or an mmap'd file (--path).
+bool MapShared(bool use_pci, const std::string& path, Mapping& out)
+{
+    if (use_pci)
+    {
+#if defined(__QNXNTO__)
+        return MapFromPci(out);
+#else
+        std::fprintf(stderr, "error: --pci is only supported on QNX; use --path instead\n");
+        return false;
+#endif
+    }
+    return MapFromPath(path, out);
+}
+
+// Command-line options.
+struct Options
+{
+    int id = -1;            // 0 = VM-A, 1 = VM-B
+    std::string path;       // set by --path
+    bool use_pci = false;   // set by --pci
+    bool want_write = false;
+    bool want_read = false;
+};
+
+// Parses argv into opts. Returns false on error or a missing/invalid --id.
+bool ParseArgs(int argc, char** argv, Options& opts)
+{
+    for (int i = 1; i < argc; ++i)
+    {
+        const std::string arg = argv[i];
+        if (arg == "--write")
+        {
+            opts.want_write = true;
+        }
+        else if (arg == "--read")
+        {
+            opts.want_read = true;
+        }
+        else if (arg == "--pci")
+        {
+            opts.use_pci = true;
+        }
+        else if (arg == "--id" && (i + 1) < argc)
+        {
+            const std::string v = argv[++i];
+            opts.id = (v == "A" || v == "a") ? 0 : ((v == "B" || v == "b") ? 1 : -1);
+        }
+        else if (arg == "--path" && (i + 1) < argc)
+        {
+            opts.path = argv[++i];
+        }
+        else
+        {
+            return false;
+        }
+    }
+    return opts.id >= 0;
+}
 }  // namespace
 
 int main(int argc, char** argv)
 {
-    std::string mode;
-    std::string path;
-    std::string message;
-    bool use_pci = false;
-
-    for (int i = 1; i < argc; ++i)
+    Options opts;
+    if (!ParseArgs(argc, argv, opts))
     {
-        const std::string arg = argv[i];
-        if (arg == "--write" && (i + 1) < argc)
-        {
-            mode = "write";
-            message = argv[++i];
-        }
-        else if (arg == "--read")
-        {
-            mode = "read";
-        }
-        else if (arg == "--pci")
-        {
-            use_pci = true;
-        }
-        else if (arg == "--path" && (i + 1) < argc)
-        {
-            path = argv[++i];
-        }
-        else
-        {
-            std::fprintf(stderr, "usage: %s --write <message> | --read [--pci | --path <dev|file>]\n", argv[0]);
-            return 2;
-        }
-    }
-
-    if (mode.empty())
-    {
-        std::fprintf(stderr, "usage: %s --write <message> | --read [--pci | --path <dev|file>]\n", argv[0]);
+        std::fprintf(stderr, "usage: %s --id <A|B> [--write] [--read] [--pci | --path <dev|file>]\n", argv[0]);
         return 2;
     }
 
-    // Default to PCI discovery on QNX when no explicit path was given.
-#if defined(__QNXNTO__)
-    if (path.empty())
+    // Default: do BOTH in one run -- write our own slot, then read + verify the peer's.
+    if (!opts.want_write && !opts.want_read)
     {
-        use_pci = true;
+        opts.want_write = true;
+        opts.want_read = true;
+    }
+
+    // On QNX default to PCI discovery when no explicit path was given.
+#if defined(__QNXNTO__)
+    if (opts.path.empty())
+    {
+        opts.use_pci = true;
     }
 #endif
-
-    if (!use_pci && path.empty())
+    if (!opts.use_pci && opts.path.empty())
     {
         std::fprintf(stderr, "error: specify --pci or --path <dev|file>\n");
         return 2;
     }
 
     Mapping mapping;
-    bool mapped = false;
-    if (use_pci)
-    {
-#if defined(__QNXNTO__)
-        mapped = MapFromPci(mapping);
-#else
-        std::fprintf(stderr, "error: --pci is only supported on QNX; use --path instead\n");
-        return 1;
-#endif
-    }
-    else
-    {
-        mapped = MapFromPath(path, mapping);
-    }
-
-    if (!mapped)
+    if (!MapShared(opts.use_pci, opts.path, mapping))
     {
         return 1;
     }
+    if (mapping.size < sizeof(Region))
+    {
+        std::fprintf(stderr, "shared region too small: %zu < %zu\n", mapping.size, sizeof(Region));
+        Unmap(mapping);
+        return 1;
+    }
 
-    auto* const block = static_cast<SharedBlock*>(mapping.addr);
+    auto& region = *static_cast<Region*>(mapping.addr);
+    const char* const name = (opts.id == 0) ? "VM-A" : "VM-B";
+
     int result = 0;
-
-    if (mode == "write")
+    if (opts.want_write)
     {
-        const std::size_t length = std::min(message.size(), sizeof(block->data) - 1U);
-        std::memcpy(block->data, message.data(), length);
-        block->data[length] = '\0';
-        block->length = static_cast<std::uint32_t>(length);
-        // Publish the data: the release store guarantees the bytes above are visible to a
-        // reader that observes the magic with an acquire load.
-        __atomic_store_n(&block->magic, kMagic, __ATOMIC_RELEASE);
-        std::printf("VM-A wrote %zu bytes: \"%s\"\n", length, block->data);
+        WriteOwnSlot(region, opts.id, name, mapping.addr);
     }
-    else  // read
+    if (opts.want_read)
     {
-        if (__atomic_load_n(&block->magic, __ATOMIC_ACQUIRE) != kMagic)
-        {
-            std::fprintf(stderr, "VM-B: no data published yet (magic mismatch)\n");
-            result = 3;
-        }
-        else
-        {
-            std::printf("VM-B read %u bytes: \"%s\"\n", block->length, block->data);
-        }
+        result = ReadPeerSlot(region, opts.id, name, mapping.addr);
     }
 
     Unmap(mapping);

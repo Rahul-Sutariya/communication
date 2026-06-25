@@ -26,11 +26,13 @@
 #        ssh -p 2222 root@localhost      # VM-A
 #        ssh -p 2223 root@localhost      # VM-B
 #   4. Run the example (the app reaches the shared region through pci-server, so no
-#      /dev/ivshmem0 guest driver is needed):
+#      /dev/ivshmem0 guest driver is needed). Each VM writes its OWN offset-pointer list
+#      and then reads + verifies the PEER's, all in a single run -- so start BOTH roughly
+#      together (each one waits for the other):
 #        # on VM-A:
-#        /opt/simple_ivshmem/bin/simple_ivshmem --write "HELLO_FROM_VM_A" --pci
+#        /opt/simple_ivshmem/bin/simple_ivshmem --id A --pci
 #        # on VM-B:
-#        /opt/simple_ivshmem/bin/simple_ivshmem --read --pci
+#        /opt/simple_ivshmem/bin/simple_ivshmem --id B --pci
 #   5. Stop the VMs:
 #        ./quality/integration_testing/environments/dual_qemu/launch_dual_qemu.sh stop
 #
@@ -143,14 +145,15 @@ start_vm "VM-B" "${SSH_PORT_B}" "${RUN_DIR}/vm_b_serial.log" "${RUN_DIR}/vm_b.pi
 cat <<EOF
 
 Both VMs are booting. Once up (watch ${RUN_DIR}/vm_*_serial.log), connect with:
-  ssh -p ${SSH_PORT_A} root@localhost      # VM-A (writer)
-  ssh -p ${SSH_PORT_B} root@localhost      # VM-B (reader)
+  ssh -p ${SSH_PORT_A} root@localhost      # VM-A
+  ssh -p ${SSH_PORT_B} root@localhost      # VM-B
 
-Then run:
+Then run (each VM writes its own offset-pointer list and reads + verifies the peer's in a
+single run -- start both roughly together, each waits for the other):
   # on VM-A
-  /opt/simple_ivshmem/bin/simple_ivshmem --write "HELLO_FROM_VM_A" --pci
+  /opt/simple_ivshmem/bin/simple_ivshmem --id A --pci
   # on VM-B
-  /opt/simple_ivshmem/bin/simple_ivshmem --read --pci
+  /opt/simple_ivshmem/bin/simple_ivshmem --id B --pci
 
 Stop both VMs with:
   $0 stop
