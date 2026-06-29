@@ -163,13 +163,14 @@ void GatewayApplication::OnServiceUnavailable(const std::string& specifier_str)
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     const auto it = proxies_.find(specifier_str);
 
-    SCORE_LANGUAGE_FUTURECPP_ASSERT_PRD_MESSAGE(it != proxies_.cend(),
-                                                "GatewayApplication: Service unavailable but proxy not found");
+    SCORE_LANGUAGE_FUTURECPP_ASSERT_PRD_MESSAGE(  // COV_JUSTIFIED gateway-container-lookup-invariant
+        it != proxies_.cend(),
+        "GatewayApplication: Service unavailable but proxy not found");
 
     score::mw::log::LogInfo() << "GatewayApplication: Service no longer available: " << specifier_str;
 
     auto specifier_result = impl::InstanceSpecifier::Create(std::string{specifier_str});
-    if (specifier_result.has_value())
+    if (specifier_result.has_value())  // COV_JUSTIFIED gateway-revalidate-known-specifier
     {
         auto result = transport_layer_->StopOfferService(std::move(specifier_result).value());
         if (!result.has_value())
@@ -187,8 +188,9 @@ void GatewayApplication::PropagateService(const std::string& specifier_str)
 {
     const auto proxy_it = proxies_.find(specifier_str);
 
-    SCORE_LANGUAGE_FUTURECPP_ASSERT_PRD_MESSAGE(proxy_it != proxies_.cend(),
-                                                "GatewayApplication: Proxy not found in PropagateService");
+    SCORE_LANGUAGE_FUTURECPP_ASSERT_PRD_MESSAGE(  // COV_JUSTIFIED gateway-container-lookup-invariant
+        proxy_it != proxies_.cend(),
+        "GatewayApplication: Proxy not found in PropagateService");
 
     auto specifier_result = impl::InstanceSpecifier::Create(std::string{specifier_str});
     if (!specifier_result.has_value())
@@ -481,7 +483,7 @@ score::Result<void> GatewayApplication::RegisterUpdateNotification(impl::Instanc
         scope_, [this, spec = specifier_str, elem_name = std::string(element_name), elem_type = element_type]() {
             std::lock_guard<std::recursive_mutex> lock(mutex_);
             auto specifier_result = impl::InstanceSpecifier::Create(std::string{spec});
-            if (specifier_result.has_value())
+            if (specifier_result.has_value())  // COV_JUSTIFIED gateway-revalidate-known-specifier
             {
                 transport_layer_->NotifyUpdate(std::move(specifier_result).value(), elem_type, std::string{elem_name});
             }
@@ -514,7 +516,7 @@ score::Result<void> GatewayApplication::UnregisterUpdateNotification(impl::Insta
         return MakeUnexpected(GatewayErrorc::kUnknownServiceInstance);
     }
 
-    SCORE_LANGUAGE_FUTURECPP_ASSERT_PRD_MESSAGE(
+    SCORE_LANGUAGE_FUTURECPP_ASSERT_PRD_MESSAGE(  // COV_JUSTIFIED gateway-notification-event-type-only
         element_type == impl::ServiceElementType::EVENT,
         "GatewayApplication: UnregisterUpdateNotification only supports events!");
 
@@ -543,8 +545,9 @@ score::Result<void> GatewayApplication::NotifyUpdate(impl::InstanceSpecifier ser
         return MakeUnexpected(GatewayErrorc::kUnknownServiceInstance);
     }
 
-    SCORE_LANGUAGE_FUTURECPP_ASSERT_PRD_MESSAGE(updated_element_type == impl::ServiceElementType::EVENT,
-                                                "GatewayApplication: NotifyUpdate only supports events!");
+    SCORE_LANGUAGE_FUTURECPP_ASSERT_PRD_MESSAGE(  // COV_JUSTIFIED gateway-notification-event-type-only
+        updated_element_type == impl::ServiceElementType::EVENT,
+        "GatewayApplication: NotifyUpdate only supports events!");
 
     auto event_map = it->second.GetEvents();
     auto event_it = event_map.find(updated_element_name);

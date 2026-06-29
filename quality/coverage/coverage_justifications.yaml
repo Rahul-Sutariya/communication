@@ -36,7 +36,33 @@
 
 version: 1
 
-justifications: []
+justifications:
+  - id: gateway-container-lookup-invariant
+    category: defensive_programming
+    reason: >
+      Defensive ASSERT_PRD guarding a map lookup that is guaranteed to succeed. The proxy entry
+      is inserted before this code path can run and is only removed during destruction, so the
+      "not found" branch is unreachable. Kept as a safety guard against future logic changes.
+  - id: gateway-notification-event-type-only
+    category: defensive_programming
+    reason: >
+      Defensive ASSERT_PRD enforcing that (un)register/notify update requests only carry EVENT
+      service elements. The gateway exclusively forwards events today, so the non-EVENT branch is
+      unreachable. Kept as a guard against future field/method support being added.
+  - id: gateway-revalidate-known-specifier
+    category: defensive_programming
+    reason: >
+      InstanceSpecifier is re-created from a string that was already validated when the proxy /
+      registration was established (or obtained via InstanceSpecifier::ToString()). Re-validation
+      therefore always succeeds and the failure branch is unreachable defensive code.
+  - id: gateway-config-toplevel-already-validated
+    category: defensive_programming
+    reason: >
+      Defensive guard in the per-section parse helpers (ParseForwardedServices/ParseReceivedServices/
+      ParseTransportLayerRef). Each helper is only ever invoked with the top-level JSON object after
+      ParseGatewayConfig has already verified it is a json::Object, so the "not an object" branch is
+      unreachable. Kept so the helpers remain safe if reused on unvalidated input.
+
   # Example entries (uncomment and adapt as needed):
   #
   # - id: config-parser-defensive-switch

@@ -109,5 +109,66 @@ TEST_F(SampleTransportConfigParserFixture, ParseNonObjectTopLevelDies)
     EXPECT_DEATH(ParseSampleTransportConfig(std::move(j)), ".*");
 }
 
+TEST_F(SampleTransportConfigParserFixture, ParseMissingHvSocketDies)
+{
+    // Given a top-level object without the mandatory "hypervisor-socket" entry
+    auto j = R"({})"_json;
+
+    // When the config is parsed
+    // Then it must terminate because hypervisor-socket is mandatory
+    EXPECT_DEATH(ParseSampleTransportConfig(std::move(j)), ".*");
+}
+
+TEST_F(SampleTransportConfigParserFixture, ParseMissingRemoteIpDies)
+{
+    // Given a hypervisor-socket without the mandatory "remote-ip" entry
+    auto j = R"(
+{
+  "hypervisor-socket": {
+    "local-port": 8080,
+    "remote-port": 9090
+  }
+}
+)"_json;
+
+    // When the config is parsed
+    // Then it must terminate because remote-ip is mandatory
+    EXPECT_DEATH(ParseSampleTransportConfig(std::move(j)), ".*");
+}
+
+TEST_F(SampleTransportConfigParserFixture, ParseMissingLocalPortDies)
+{
+    // Given a hypervisor-socket without the mandatory "local-port" entry
+    auto j = R"(
+{
+  "hypervisor-socket": {
+    "remote-ip": "192.168.0.1",
+    "remote-port": 9090
+  }
+}
+)"_json;
+
+    // When the config is parsed
+    // Then it must terminate because local-port is mandatory
+    EXPECT_DEATH(ParseSampleTransportConfig(std::move(j)), ".*");
+}
+
+TEST_F(SampleTransportConfigParserFixture, ParseMissingRemotePortDies)
+{
+    // Given a hypervisor-socket without the mandatory "remote-port" entry
+    auto j = R"(
+{
+  "hypervisor-socket": {
+    "remote-ip": "192.168.0.1",
+    "local-port": 8080
+  }
+}
+)"_json;
+
+    // When the config is parsed
+    // Then it must terminate because remote-port is mandatory
+    EXPECT_DEATH(ParseSampleTransportConfig(std::move(j)), ".*");
+}
+
 }  // namespace
 }  // namespace score::mw::com::gateway

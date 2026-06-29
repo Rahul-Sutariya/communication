@@ -257,6 +257,16 @@ TEST(GatewayApplicationSetupTest, SetupWithoutInjectedTransportCallsTransportFac
     EXPECT_DEATH(app.Setup(), ".*");
 }
 
+TEST(GatewayApplicationSetupTest, SetupWithUnknownTransportLayerIdTerminates)
+{
+    // Given a GatewayApplication configured with an unknown transport-layer id and no injected transport
+    GatewayApplication app{GatewayConfiguration{{}, {}, "unknown_transport", "/etc/gateway/transport.json"}};
+
+    // When Setup() is called
+    // Then TransportFactory::Create hits the "no implementation registered" branch and terminates
+    EXPECT_DEATH(app.Setup(), ".*");
+}
+
 // ---------------------------------------------------------------------------
 // OnSubscriptionStateChanged tests
 // ---------------------------------------------------------------------------

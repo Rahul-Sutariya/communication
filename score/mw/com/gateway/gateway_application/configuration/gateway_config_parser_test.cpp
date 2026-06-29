@@ -70,5 +70,46 @@ TEST_F(GatewayConfigParserFixture, ParseNonObjectTopLevelDies)
     EXPECT_DEATH(ParseGatewayConfig(std::move(j)), ".*");
 }
 
+TEST_F(GatewayConfigParserFixture, ParseEmptyObjectYieldsDefaults)
+{
+    // Given a top-level JSON object without any of the optional keys
+    auto j = R"({})"_json;
+
+    // When the config is parsed
+    const auto config = ParseGatewayConfig(std::move(j));
+
+    // Then forwarded/received services are empty and transport-layer fields default to empty
+    EXPECT_TRUE(config.GetForwardedServices().empty());
+    EXPECT_TRUE(config.GetReceivedServices().empty());
+    EXPECT_EQ("", config.GetTransportLayerId());
+    EXPECT_EQ("", config.GetTransportConfigPath());
+}
+
+TEST_F(GatewayConfigParserFixture, ParseTransportLayerNotAnObjectYieldsDefaults)
+{
+    // Given a config whose "transport-layer" entry is present but not an object
+    auto j = R"({"transport-layer": "not-an-object"})"_json;
+
+    // When the config is parsed
+    const auto config = ParseGatewayConfig(std::move(j));
+
+    // Then the transport-layer fields default to empty
+    EXPECT_EQ("", config.GetTransportLayerId());
+    EXPECT_EQ("", config.GetTransportConfigPath());
+}
+
+TEST_F(GatewayConfigParserFixture, ParseTransportLayerWithoutIdAndPathYieldsDefaults)
+{
+    // Given a "transport-layer" object missing both "id" and "config-path"
+    auto j = R"({"transport-layer": {}})"_json;
+
+    // When the config is parsed
+    const auto config = ParseGatewayConfig(std::move(j));
+
+    // Then the transport-layer fields default to empty
+    EXPECT_EQ("", config.GetTransportLayerId());
+    EXPECT_EQ("", config.GetTransportConfigPath());
+}
+
 }  // namespace
 }  // namespace score::mw::com::gateway

@@ -34,7 +34,7 @@ constexpr auto kTransportConfigPathKey = "config-path"sv;
 auto ParseForwardedServices(const score::json::Any& json) noexcept -> std::vector<std::string>
 {
     std::vector<std::string> forwarded_services{};
-    if (json.As<score::json::Object>().has_value())
+    if (json.As<score::json::Object>().has_value())  // COV_JUSTIFIED gateway-config-toplevel-already-validated
     {
         const auto& forwarded_services_entry =
             json.As<score::json::Object>().value().get().find(kForwardedServicesKey.data());
@@ -54,7 +54,7 @@ auto ParseReceivedServices(const score::json::Any& json) noexcept -> std::vector
 {
     std::vector<std::string> received_services{};
 
-    if (json.As<score::json::Object>().has_value())
+    if (json.As<score::json::Object>().has_value())  // COV_JUSTIFIED gateway-config-toplevel-already-validated
     {
         const auto& received_services_entry =
             json.As<score::json::Object>().value().get().find(kReceivedServicesKey.data());
@@ -75,7 +75,7 @@ auto ParseTransportLayerRef(const score::json::Any& json) noexcept -> std::pair<
     std::string transport_layer_id{};
     std::string transport_config_path{};
 
-    if (json.As<score::json::Object>().has_value())
+    if (json.As<score::json::Object>().has_value())  // COV_JUSTIFIED gateway-config-toplevel-already-validated
     {
         const auto& transport_layer_entry =
             json.As<score::json::Object>().value().get().find(kTransportLayerKey.data());
