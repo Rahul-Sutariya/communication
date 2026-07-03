@@ -10,4 +10,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 # *******************************************************************************
-exports_files(["restore_qnx8_poll_workaround.patch"])
+exports_files([
+    "restore_qnx8_poll_workaround.patch",
+    "lib_memory_lockfree_alloc.patch",
+])

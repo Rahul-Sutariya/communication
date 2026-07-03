@@ -33,8 +33,20 @@ git_override(
     commit = "8d4e0847424a565846e7a8a24c4c0018e3b14da9",
     patch_strip = 1,
     # Patch baselibs with a QNX8 workaround for poll
-    # until a fix is provided by the QNX SDP
-    patches = ["//third_party/score_baselibs:restore_qnx8_poll_workaround.patch"],
+    # until a fix is provided by the QNX SDP, and replace the ControlBlock
+    # process-shared pthread mutex with a lock-free (compare-exchange) bump
+    # allocator so lib-memory can back its shared region with a QEMU ivshmem PCI
+    # BAR shared between two QNX guests (a pthread mutex cannot be locked on
+    # device memory and cannot synchronize across separate kernels; a lock-free
+    # atomic counter needs no lock object in shared memory at all).
+    patches = [
+        # QNX SDP 8 workaround for poll() in abortable_blocking_reader (until QNX provides a fix).
+        "//third_party/score_baselibs:restore_qnx8_poll_workaround.patch",
+        # Replace the ControlBlock process-shared pthread mutex with a lock-free (CAS) bump
+        # allocator, so lib-memory can back its region with a QEMU ivshmem PCI BAR (a pthread
+        # mutex can't be locked on device memory nor synchronize across separate kernels).
+        "//third_party/score_baselibs:lib_memory_lockfree_alloc.patch",
+    ],
     remote = "https://github.com/eclipse-score/baselibs.git",
 )
 
