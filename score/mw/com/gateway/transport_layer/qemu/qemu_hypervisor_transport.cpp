@@ -53,19 +53,23 @@ ShmPaths ResolveInterVmShmPaths(const impl::InstanceSpecifier& specifier)
     return ShmPaths{base + "/ctrl", base + "/data"};
 }
 
-ShmSizes GetInterVmShmSizes([[maybe_unused]] const impl::InstanceSpecifier& specifier)
+#if defined(__QNXNTO__)
+ShmSizes GetInterVmShmSizes(const impl::InstanceSpecifier& specifier, const score::os::qnx::MmanQnx* mman_qnx)
 {
     // Query the actual sizes of the existing shm objects that the local skeleton created.
     // The source-side skeleton has already called SharedMemoryFactory::Create() for both
     // CTRL and DATA shm. We open them briefly to read their size via fstat().
-    [[maybe_unused]] const auto paths = ResolveInterVmShmPaths(specifier);
+    const auto paths = ResolveInterVmShmPaths(specifier);
     ShmSizes sizes{0U, 0U};
 
-#if defined(__QNXNTO__)
-    // Query CTRL shm size.
+    // Query CTRL shm size
     {
-        const int fd = ::shm_open(paths.control.c_str(), O_RDONLY, 0);
-        // COV_JUSTIFIED_START qemu-get-intervm-shm-sizes-fd-valid
+        std::int32_t fd = -1;
+        const auto fd_result = mman_qnx->shm_open(paths.control.c_str(), O_RDONLY, 0);
+        if (fd_result.has_value())
+        {
+            fd = fd_result.value();
+        }
         if (fd != -1)
         {
             struct stat st{};
@@ -75,12 +79,15 @@ ShmSizes GetInterVmShmSizes([[maybe_unused]] const impl::InstanceSpecifier& spec
             }
             (void)::close(fd);
         }
-        // COV_JUSTIFIED_STOP
     }
-    // Query DATA shm size.
+    // Query DATA shm size
     {
-        const int fd = ::shm_open(paths.data.c_str(), O_RDONLY, 0);
-        // COV_JUSTIFIED_START qemu-get-intervm-shm-sizes-fd-valid
+        std::int32_t fd = -1;
+        const auto fd_result = mman_qnx->shm_open(paths.data.c_str(), O_RDONLY, 0);
+        if (fd_result.has_value())
+        {
+            fd = fd_result.value();
+        }
         if (fd != -1)
         {
             struct stat st{};
@@ -90,11 +97,15 @@ ShmSizes GetInterVmShmSizes([[maybe_unused]] const impl::InstanceSpecifier& spec
             }
             (void)::close(fd);
         }
-        // COV_JUSTIFIED_STOP
     }
-#endif
     return sizes;
 }
+#else
+ShmSizes GetInterVmShmSizes([[maybe_unused]] const impl::InstanceSpecifier& specifier)
+{
+    return ShmSizes{0U, 0U};
+}
+#endif
 
 QemuHypervisorTransport::QemuHypervisorTransport(
     GatewayCore& gateway_app,
@@ -284,7 +295,11 @@ void QemuHypervisorTransport::Shutdown()
 score::ResultBlank QemuHypervisorTransport::ProvideService(impl::InstanceSpecifier service_instance_specifier,
                                                            std::vector<impl::EventInfo> service_elements)
 {
+#if defined(__QNXNTO__)
+    const auto shm_sizes = GetInterVmShmSizes(service_instance_specifier, ivshmem_provider_->GetMmanQnx());
+#else
     const auto shm_sizes = GetInterVmShmSizes(service_instance_specifier);
+#endif
 
     ProvideServiceRequest request{
         std::move(service_instance_specifier), std::move(service_elements), shm_sizes.control, shm_sizes.data};

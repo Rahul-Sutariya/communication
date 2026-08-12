@@ -127,20 +127,6 @@ justifications:
         line_start: 45
         line_end: 133
 
-  - id: qemu-get-intervm-shm-sizes-fd-valid
-    category: defensive_programming
-    platforms: [qnx]
-    reason: >
-      GetInterVmShmSizes() can now use injectable MmanQnx abstraction via ivshmem_provider_->GetMmanQnx().
-      Tests can mock shm_open success path and verify fd != -1 branch logic.
-    locations:
-      - file: score/mw/com/gateway/transport_layer/qemu/qemu_hypervisor_transport.cpp
-        line_start: 56
-        line_end: 123
-      - file: score/mw/com/gateway/transport_layer/qemu/qemu_hypervisor_transport.h
-        line_start: 32
-        line_end: 38
-
   - id: qemu-worldwritable-ctor-gcc-artifact
     category: defensive_programming
     platforms: [qnx]

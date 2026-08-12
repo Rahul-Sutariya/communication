@@ -146,6 +146,19 @@ class IvshmemTypedMemoryProvider : public score::memory::shared::TypedMemory
     /// @return Expected value containing the UID on success, or a score::os::Error on failure.
     score::cpp::expected<uid_t, score::os::Error> GetCreatorUid(std::string_view shm_name) const noexcept override;
 
+#if defined(__QNXNTO__)
+    /// @brief Returns the MmanQnx abstraction used by this provider (QNX only).
+    ///
+    /// Allows callers (e.g. the transport layer) to reuse the same abstraction
+    /// instance for shm_open operations without creating a separate instance.
+    ///
+    /// @return Raw pointer to the MmanQnx instance. Lifetime is tied to this provider.
+    score::os::qnx::MmanQnx* GetMmanQnx() const noexcept
+    {
+        return mman_qnx_.get();
+    }
+#endif
+
     /// @brief Maximum length (including null terminator) of a shm name stored in a directory entry.
     ///
     /// Covers paths like /intervm-shared-shmem/<service>/<instance>/ctrl (typically ≤ 55 chars).

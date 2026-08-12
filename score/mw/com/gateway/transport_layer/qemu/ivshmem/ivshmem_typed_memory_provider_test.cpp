@@ -774,7 +774,12 @@ TEST(IvshmemQnxLookupOffsetTest, OversizedCountStopsAtMaxEntriesGuard)
 
 TEST(IvshmemQnxLookupOffsetTest, OversizedCountAllocateCoversAllocateFindNextFreeOffset)
 {
-    // Given directory buffer with oversized count and max entries
+    // Given a tight BAR and a directory already filled to max entries.
+    constexpr std::uint64_t kEntrySize = 4096U;
+    constexpr std::uint64_t kTightBarSize =
+        static_cast<std::uint64_t>(IvshmemTypedMemoryProvider::kMaxDirectoryEntries) * kEntrySize +
+        IvshmemTypedMemoryProvider::kDirectorySize;
+
     std::array<std::uint8_t, IvshmemTypedMemoryProvider::kDirectorySize> buf{};
     FillDirectoryEntries(buf.data(), IvshmemTypedMemoryProvider::kMaxDirectoryEntries);
     // Write count at the correct header offset (count is at offset 4, not offset 0).
@@ -784,7 +789,7 @@ TEST(IvshmemQnxLookupOffsetTest, OversizedCountAllocateCoversAllocateFindNextFre
 
     auto mman_mock = std::make_unique<::testing::StrictMock<score::os::qnx::MmanQnxMock>>();
     auto* const raw = mman_mock.get();
-    TestableIvshmemTypedMemoryProvider p{0x100000U, 1024U * 1024U, std::move(mman_mock)};
+    TestableIvshmemTypedMemoryProvider p{0x100000U, kTightBarSize, std::move(mman_mock)};
 
     EXPECT_CALL(*raw,
                 mmap(nullptr,

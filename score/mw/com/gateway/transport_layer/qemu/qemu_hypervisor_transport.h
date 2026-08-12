@@ -30,7 +30,11 @@ namespace score::mw::com::gateway
 ShmPaths ResolveInterVmShmPaths(const impl::InstanceSpecifier& specifier);
 
 /// Opens the existing shm objects and returns their sizes.
+#if defined(__QNXNTO__)
+ShmSizes GetInterVmShmSizes(const impl::InstanceSpecifier& specifier, const score::os::qnx::MmanQnx* mman_qnx);
+#else
 ShmSizes GetInterVmShmSizes(const impl::InstanceSpecifier& specifier);
+#endif
 
 /// QEMU/ivshmem-based transport layer for the LoLa gateway.
 ///

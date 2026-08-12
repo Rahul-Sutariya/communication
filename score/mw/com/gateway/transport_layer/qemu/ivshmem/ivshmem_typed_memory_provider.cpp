@@ -351,9 +351,9 @@ score::cpp::expected_blank<score::os::Error> IvshmemTypedMemoryProvider::Allocat
 {
 #if defined(__QNXNTO__)
     std::lock_guard<std::mutex> lock{mutex_};
-    void* dir = MapDirectory();
 
-    // Check local cache first — if already allocated by this process, reuse.
+    // Check local cache first — if already allocated by this process, reuse
+    // without touching the shared BAR directory (avoids unnecessary mmap).
     auto it = allocations_.find(shm_name);
     if (it != allocations_.end())
     {
@@ -362,6 +362,7 @@ score::cpp::expected_blank<score::os::Error> IvshmemTypedMemoryProvider::Allocat
 
     const std::uint64_t alloc_size = AlignUp(static_cast<std::uint64_t>(shm_size), kPageSize);
 
+    void* dir = MapDirectory();
     if (dir == nullptr)
     {
         ::score::mw::log::LogError() << "IvshmemTypedMemoryProvider: failed to map BAR directory; "
