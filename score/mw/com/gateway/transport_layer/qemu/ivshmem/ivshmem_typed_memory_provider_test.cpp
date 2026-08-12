@@ -314,8 +314,10 @@ TEST_F(IvshmemTypedMemoryProviderTest, LookupOffsetInDirectoryReturnsNulloptOnNo
 // Each synthetic entry uses a unique non-colliding hash and sequential 4 KiB offsets.
 static void FillDirectoryEntries(std::uint8_t* buf, std::uint32_t count) noexcept
 {
-    *reinterpret_cast<std::uint32_t*>(buf) = count;
-    auto* entries = reinterpret_cast<IvshmemTypedMemoryProvider::DirectoryEntry*>(buf + sizeof(std::uint32_t));
+    *reinterpret_cast<std::uint32_t*>(buf) = 0U;
+    *reinterpret_cast<std::uint32_t*>(buf + sizeof(std::uint32_t)) = count;
+    auto* entries = reinterpret_cast<IvshmemTypedMemoryProvider::DirectoryEntry*>(
+        buf + IvshmemTypedMemoryProvider::kDirectoryHeaderSize);
     for (std::uint32_t i = 0U; i < count; ++i)
     {
         entries[i].name_hash = 0xDEAD0000U + i;  // chosen to not collide with any test name
@@ -376,8 +378,9 @@ TEST(IvshmemQnxLookupOffsetTest, ReturnsOffsetWhenEntryFoundInDirectory)
     // Given a directory buffer with matching entry
     std::array<std::uint8_t, IvshmemTypedMemoryProvider::kDirectorySize> buf{};
     const std::uint32_t target_hash = IvshmemTypedMemoryProvider::HashName("/shm_target");
-    *reinterpret_cast<std::uint32_t*>(buf.data()) = 1U;
-    auto* entry = reinterpret_cast<IvshmemTypedMemoryProvider::DirectoryEntry*>(buf.data() + sizeof(std::uint32_t));
+    *reinterpret_cast<std::uint32_t*>(buf.data() + sizeof(std::uint32_t)) = 1U;
+    auto* entry = reinterpret_cast<IvshmemTypedMemoryProvider::DirectoryEntry*>(
+        buf.data() + IvshmemTypedMemoryProvider::kDirectoryHeaderSize);
     entry->name_hash = target_hash;
     entry->bar_offset = 8192U;
     entry->alloc_size = 4096U;
@@ -407,8 +410,9 @@ TEST(IvshmemQnxLookupOffsetTest, ReturnsNulloptWhenEntryNotFoundInDirectory)
 {
     // Given a directory buffer with a different entry
     std::array<std::uint8_t, IvshmemTypedMemoryProvider::kDirectorySize> buf{};
-    *reinterpret_cast<std::uint32_t*>(buf.data()) = 1U;
-    auto* entry = reinterpret_cast<IvshmemTypedMemoryProvider::DirectoryEntry*>(buf.data() + sizeof(std::uint32_t));
+    *reinterpret_cast<std::uint32_t*>(buf.data() + sizeof(std::uint32_t)) = 1U;
+    auto* entry = reinterpret_cast<IvshmemTypedMemoryProvider::DirectoryEntry*>(
+        buf.data() + IvshmemTypedMemoryProvider::kDirectoryHeaderSize);
     entry->name_hash = IvshmemTypedMemoryProvider::HashName("/other_shm");
     entry->bar_offset = 4096U;
     entry->alloc_size = 4096U;
@@ -477,7 +481,8 @@ TEST(IvshmemQnxAllocateNamedTest, DirectoryHitBindsShm)
     std::array<std::uint8_t, IvshmemTypedMemoryProvider::kDirectorySize> buf{};
     const std::uint32_t target_hash = IvshmemTypedMemoryProvider::HashName("/test_shm");
     *reinterpret_cast<std::uint32_t*>(buf.data()) = 1U;
-    auto* entry = reinterpret_cast<IvshmemTypedMemoryProvider::DirectoryEntry*>(buf.data() + sizeof(std::uint32_t));
+    auto* entry = reinterpret_cast<IvshmemTypedMemoryProvider::DirectoryEntry*>(
+        buf.data() + IvshmemTypedMemoryProvider::kDirectoryHeaderSize);
     entry->name_hash = target_hash;
     entry->bar_offset = 4096U;
     entry->alloc_size = 4096U;
@@ -743,7 +748,8 @@ TEST(IvshmemQnxLookupOffsetTest, OversizedCountStopsAtMaxEntriesGuard)
     // Given directory buffer with oversized count exceeding limit
     std::array<std::uint8_t, IvshmemTypedMemoryProvider::kDirectorySize> buf{};
     FillDirectoryEntries(buf.data(), IvshmemTypedMemoryProvider::kMaxDirectoryEntries);
-    *reinterpret_cast<std::uint32_t*>(buf.data()) = IvshmemTypedMemoryProvider::kMaxDirectoryEntries + 5U;
+    *reinterpret_cast<std::uint32_t*>(buf.data() + sizeof(std::uint32_t)) =
+        IvshmemTypedMemoryProvider::kMaxDirectoryEntries + 5U;
 
     auto mman_mock = std::make_unique<::testing::StrictMock<score::os::qnx::MmanQnxMock>>();
     auto* const raw = mman_mock.get();
@@ -805,7 +811,8 @@ TEST(IvshmemTypedMemoryProviderStaticTest, DirectorySizeIs4096)
 TEST(IvshmemTypedMemoryProviderStaticTest, MaxDirectoryEntriesFitsInDirectoryPage)
 {
     // When calculating max directory entries
-    const std::uint32_t expected = (4096U - sizeof(std::uint32_t)) / sizeof(IvshmemTypedMemoryProvider::DirectoryEntry);
+    const std::uint32_t expected =
+        (4096U - IvshmemTypedMemoryProvider::kDirectoryHeaderSize) / sizeof(IvshmemTypedMemoryProvider::DirectoryEntry);
 
     // Then count fits within directory page and is positive
     EXPECT_EQ(IvshmemTypedMemoryProvider::kMaxDirectoryEntries, expected);

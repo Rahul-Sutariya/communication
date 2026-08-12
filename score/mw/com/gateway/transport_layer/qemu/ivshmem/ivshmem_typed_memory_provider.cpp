@@ -19,8 +19,10 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstring>
+#include <thread>
 
 #if defined(__QNXNTO__)
 #include <sys/mman.h>
@@ -37,9 +39,62 @@ namespace
 #if defined(__QNXNTO__)
 constexpr std::uint64_t kPageSize = 4096U;
 
+struct DirectoryHeader
+{
+    std::uint32_t lock_word;
+    std::uint32_t count;
+};
+
 std::uint64_t AlignUp(std::uint64_t value, std::uint64_t alignment) noexcept
 {
     return (value + alignment - 1U) & ~(alignment - 1U);
+}
+
+class DirectoryLockGuard
+{
+  public:
+    explicit DirectoryLockGuard(std::uint32_t* lock_word) noexcept : lock_word_{lock_word}
+    {
+        std::uint32_t expected = 0U;
+        while (!__atomic_compare_exchange_n(lock_word_, &expected, 1U, false, __ATOMIC_ACQUIRE, __ATOMIC_RELAXED))
+        {
+            expected = 0U;
+            std::this_thread::yield();
+        }
+    }
+
+    DirectoryLockGuard(const DirectoryLockGuard&) = delete;
+    DirectoryLockGuard& operator=(const DirectoryLockGuard&) = delete;
+
+    ~DirectoryLockGuard() noexcept
+    {
+        __atomic_store_n(lock_word_, 0U, __ATOMIC_RELEASE);
+    }
+
+  private:
+    std::uint32_t* lock_word_;
+};
+
+DirectoryHeader* AsDirectoryHeader(void* dir) noexcept
+{
+    return static_cast<DirectoryHeader*>(dir);
+}
+
+const DirectoryHeader* AsDirectoryHeader(const void* dir) noexcept
+{
+    return static_cast<const DirectoryHeader*>(dir);
+}
+
+IvshmemTypedMemoryProvider::DirectoryEntry* GetDirectoryEntries(DirectoryHeader* header) noexcept
+{
+    return reinterpret_cast<IvshmemTypedMemoryProvider::DirectoryEntry*>(
+        static_cast<char*>(static_cast<void*>(header)) + sizeof(DirectoryHeader));
+}
+
+const IvshmemTypedMemoryProvider::DirectoryEntry* GetDirectoryEntries(const DirectoryHeader* header) noexcept
+{
+    return reinterpret_cast<const IvshmemTypedMemoryProvider::DirectoryEntry*>(
+        static_cast<const char*>(static_cast<const void*>(header)) + sizeof(DirectoryHeader));
 }
 #endif
 }  // namespace
@@ -89,6 +144,23 @@ void* IvshmemTypedMemoryProvider::MapDirectory() const noexcept
     directory_map_ = mmap_result.value();
     return mmap_result.value();
 }
+
+std::optional<std::uint64_t> LookupOffsetInDirectoryLocked(const std::string& shm_name,
+                                                           const DirectoryHeader* header) noexcept
+{
+    const auto* entries = GetDirectoryEntries(header);
+    const std::uint32_t count = header->count;
+    const std::uint32_t hash = IvshmemTypedMemoryProvider::HashName(shm_name);
+
+    for (std::uint32_t i = 0U; i < count && i < IvshmemTypedMemoryProvider::kMaxDirectoryEntries; ++i)
+    {
+        if (entries[i].name_hash == hash)
+        {
+            return static_cast<std::uint64_t>(entries[i].bar_offset);
+        }
+    }
+    return std::nullopt;
+}
 #endif
 
 #if defined(__QNXNTO__)
@@ -96,16 +168,17 @@ void IvshmemTypedMemoryProvider::WriteDirectoryEntry(const std::string& shm_name
                                                      std::uint64_t offset,
                                                      std::uint32_t size) const noexcept
 {
+    // Caller must hold the shared directory lock.
     void* dir = MapDirectory();
     if (dir == nullptr)
     {
         return;
     }
 
-    auto* count_ptr = static_cast<volatile std::uint32_t*>(dir);
-    auto* entries = reinterpret_cast<volatile DirectoryEntry*>(static_cast<char*>(dir) + sizeof(std::uint32_t));
+    auto* header = AsDirectoryHeader(dir);
+    auto* entries = GetDirectoryEntries(header);
 
-    const std::uint32_t count = *count_ptr;
+    const std::uint32_t count = header->count;
     if (count >= kMaxDirectoryEntries)
     {
         ::score::mw::log::LogError() << "IvshmemTypedMemoryProvider: directory full (" << count << " entries)";
@@ -134,22 +207,23 @@ void IvshmemTypedMemoryProvider::WriteDirectoryEntry(const std::string& shm_name
 
     std::memcpy(const_cast<DirectoryEntry*>(&entries[count]), &entry, sizeof(entry));
     std::atomic_thread_fence(std::memory_order_release);
-    *count_ptr = count + 1U;
+    header->count = count + 1U;
 }
 
 std::uint64_t IvshmemTypedMemoryProvider::FindNextFreeOffsetInDirectory() const noexcept
 {
+    // Caller must hold the shared directory lock.
     void* dir = MapDirectory();
     if (dir == nullptr)
     {
         return 0U;
     }
 
-    auto* count_ptr = static_cast<volatile std::uint32_t*>(dir);
-    auto* entries = reinterpret_cast<volatile DirectoryEntry*>(static_cast<char*>(dir) + sizeof(std::uint32_t));
+    auto* header = AsDirectoryHeader(dir);
+    auto* entries = GetDirectoryEntries(header);
 
     std::atomic_thread_fence(std::memory_order_acquire);
-    const std::uint32_t count = *count_ptr;
+    const std::uint32_t count = header->count;
 
     // Find the end of the highest existing allocation (from either VM).
     std::uint64_t highest_end = 0U;
@@ -173,21 +247,11 @@ std::optional<std::uint64_t> IvshmemTypedMemoryProvider::LookupOffsetInDirectory
         return std::nullopt;
     }
 
-    auto* count_ptr = static_cast<volatile std::uint32_t*>(dir);
-    auto* entries = reinterpret_cast<volatile DirectoryEntry*>(static_cast<char*>(dir) + sizeof(std::uint32_t));
+    auto* header = AsDirectoryHeader(dir);
+    DirectoryLockGuard lock{&header->lock_word};
 
     std::atomic_thread_fence(std::memory_order_acquire);
-    const std::uint32_t count = *count_ptr;
-    const std::uint32_t hash = HashName(shm_name);
-
-    for (std::uint32_t i = 0U; i < count && i < kMaxDirectoryEntries; ++i)
-    {
-        if (entries[i].name_hash == hash)
-        {
-            return static_cast<std::uint64_t>(entries[i].bar_offset);
-        }
-    }
-    return std::nullopt;
+    return LookupOffsetInDirectoryLocked(shm_name, header);
 #else
     (void)shm_name;
     return std::nullopt;
@@ -247,6 +311,7 @@ score::cpp::expected_blank<score::os::Error> IvshmemTypedMemoryProvider::Allocat
 {
 #if defined(__QNXNTO__)
     std::lock_guard<std::mutex> lock{mutex_};
+    void* dir = MapDirectory();
 
     // Check local cache first — if already allocated by this process, reuse.
     auto it = allocations_.find(shm_name);
@@ -255,9 +320,28 @@ score::cpp::expected_blank<score::os::Error> IvshmemTypedMemoryProvider::Allocat
         return BindShmToBar(shm_size, shm_name, it->second);
     }
 
+    const std::uint64_t alloc_size = AlignUp(static_cast<std::uint64_t>(shm_size), kPageSize);
+
+    if (dir == nullptr)
+    {
+        if (alloc_size > usable_size_)
+        {
+            ::score::mw::log::LogError() << "IvshmemTypedMemoryProvider: BAR exhausted (need "
+                                         << static_cast<std::uint64_t>(alloc_size) << " at offset 0, usable "
+                                         << static_cast<std::uint64_t>(usable_size_) << ")";
+            return score::cpp::make_unexpected(score::os::Error::createFromErrno(ENOMEM));
+        }
+
+        allocations_[shm_name] = 0U;
+        return BindShmToBar(shm_size, shm_name, 0U);
+    }
+
+    auto* header = AsDirectoryHeader(dir);
+    DirectoryLockGuard directory_lock{&header->lock_word};
+
     // Check if already in the BAR directory (e.g. allocated by the other VM, or by a
     // previous run of this process). Reuse the same offset.
-    auto dir_offset = LookupOffsetInDirectory(shm_name);
+    auto dir_offset = LookupOffsetInDirectoryLocked(shm_name, header);
     if (dir_offset.has_value())
     {
         allocations_[shm_name] = dir_offset.value();
@@ -267,7 +351,6 @@ score::cpp::expected_blank<score::os::Error> IvshmemTypedMemoryProvider::Allocat
     // New allocation: scan ALL directory entries (from both VMs) to find the next free
     // offset after the highest existing allocation.
     const std::uint64_t offset = FindNextFreeOffsetInDirectory();
-    const std::uint64_t alloc_size = AlignUp(static_cast<std::uint64_t>(shm_size), kPageSize);
 
     if (offset + alloc_size > usable_size_)
     {
