@@ -64,6 +64,19 @@ TEST(IvshmemBarDiscoveryTest, SelectIvshmemBarReturnsNulloptWhenRequiredBarMissi
     EXPECT_FALSE(selected.has_value());
 }
 
+TEST(IvshmemBarDiscoveryTest, SelectIvshmemBarIgnoresIoBars)
+{
+    // Given bars where the BAR at kDefaultIvshmemBarNum exists but is I/O-space, not memory-space.
+    // An I/O BAR cannot be mmap'd for shared memory, so SelectIvshmemBar must reject it even
+    // though the bar_num matches.
+    const std::vector<IvshmemBar> bars{
+        IvshmemBar{kDefaultIvshmemBarNum, 0x1000U, 0x2000U, /*is_memory=*/false},
+    };
+
+    const auto selected = SelectIvshmemBar(bars);
+    EXPECT_FALSE(selected.has_value());
+}
+
 TEST(IvshmemBarDiscoveryTest, DiscoverIvshmemBarReturnsFalseOnNonQnx)
 {
     std::uint64_t paddr = 0U;

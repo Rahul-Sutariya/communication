@@ -146,21 +146,32 @@ class IvshmemTypedMemoryProvider : public score::memory::shared::TypedMemory
     /// @return Expected value containing the UID on success, or a score::os::Error on failure.
     score::cpp::expected<uid_t, score::os::Error> GetCreatorUid(std::string_view shm_name) const noexcept override;
 
+    /// @brief Maximum length (including null terminator) of a shm name stored in a directory entry.
+    ///
+    /// Covers paths like /intervm-shared-shmem/<service>/<instance>/ctrl (typically ≤ 55 chars).
+    /// Names exceeding this limit are truncated and a warning is logged; the 32-bit FNV-1a
+    /// hash is then the sole disambiguator for those entries.
+    static constexpr std::uint32_t kMaxNameLength = 56U;
+
     /// @brief Directory entry stored in the BAR.
     ///
     /// Visible to both VMs via the shared physical memory. Used by the allocation directory
-    /// to track allocated regions.
+    /// to track allocated regions.  The @c name field provides a secondary collision check
+    /// on top of the 32-bit FNV-1a @c name_hash so that two different shm names that happen
+    /// to produce the same hash value are not confused.
     struct DirectoryEntry
     {
-        std::uint32_t name_hash;   ///< FNV-1a hash of the shm name
-        std::uint32_t alloc_size;  ///< page-aligned allocation size in bytes
-        std::uint64_t bar_offset;  ///< offset within the usable BAR region
+        std::uint32_t name_hash;    ///< FNV-1a hash of the shm name (fast first filter)
+        std::uint32_t alloc_size;   ///< page-aligned allocation size in bytes
+        std::uint64_t bar_offset;   ///< offset within the usable BAR region
+        char name[kMaxNameLength];  ///< null-terminated shm name (truncated if > kMaxNameLength-1)
     };
+    static_assert(sizeof(DirectoryEntry) == 72U, "DirectoryEntry layout must be 72 bytes for BAR wire format");
 
     /// @brief Size of the directory region reserved at the end of the usable BAR.
     static constexpr std::uint64_t kDirectorySize = 4096U;
 
-    /// @brief Size of the directory header (cross-VM lock + entry count).
+    /// @brief Size of the directory header (cross-VM lock word + entry count, two uint32_t fields).
     static constexpr std::uint64_t kDirectoryHeaderSize = sizeof(std::uint32_t) * 2U;
 
     /// @brief Maximum directory entries (header + entries fit in one page).
@@ -193,12 +204,19 @@ class IvshmemTypedMemoryProvider : public score::memory::shared::TypedMemory
                                                               const std::string& shm_name,
                                                               std::uint64_t offset) const noexcept;
 
-    /// @brief Local cache: name -> BAR offset.
+    /// @brief Inserts or overwrites an entry in the local per-process allocation cache.
     ///
-    /// Protected to allow testing via subclass.
-    mutable std::unordered_map<std::string, std::uint64_t> allocations_;
+    /// Provided for white-box test subclasses that need to pre-populate the cache without
+    /// going through the full allocation path.  Must not be called from production code.
+    void SetAllocationInCache(const std::string& name, std::uint64_t offset) const noexcept
+    {
+        std::lock_guard<std::mutex> lock{mutex_};
+        allocations_[name] = offset;
+    }
 
   private:
+    /// Local cache: shm name → BAR offset.  Protected by mutex_.
+    mutable std::unordered_map<std::string, std::uint64_t> allocations_;
 #if defined(__QNXNTO__)
     /// @brief Writes an entry to the BAR-resident directory.
     ///
@@ -221,7 +239,8 @@ class IvshmemTypedMemoryProvider : public score::memory::shared::TypedMemory
     /// @return Pointer to the mapped directory region, or nullptr on failure.
     void* MapDirectory() const noexcept;
 
-    mutable void* directory_map_{nullptr};  ///< cached mmap of the directory region
+    mutable void* directory_map_{nullptr};    ///< cached mmap of the directory region
+    mutable std::mutex directory_map_mutex_;  ///< guards the lazy mmap initialisation of directory_map_
     std::unique_ptr<score::os::qnx::MmanQnx> mman_qnx_;
     std::uint64_t paddr_;        ///< Physical base address of the ivshmem BAR
     std::uint64_t usable_size_;  ///< size - kDirectorySize (space for shm allocations)

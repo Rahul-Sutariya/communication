@@ -60,5 +60,28 @@ TEST(QemuTransportConfigParserTest, ReadsPreferredIvshmemBarNum)
     EXPECT_EQ(config.GetPreferredIvshmemBarNum(), 3U);
 }
 
+TEST(QemuTransportConfigParserTest, UsesDefaultWhenPreferredBarNumIsNotInteger)
+{
+    // Given a config where preferred-bar-num is a non-integer value
+    auto json = R"JSON(
+    {
+      "hypervisor-socket": {
+        "remote-ip": "10.0.2.2",
+        "local-port": 45001,
+        "remote-port": 45002
+      },
+      "ivshmem": {
+        "preferred-bar-num": "not-a-number"
+      }
+    }
+    )JSON"_json;
+
+    // When parsing the config
+    const auto config = ParseQemuTransportConfig(std::move(json));
+
+    // Then the parser silently falls back to the default bar num instead of crashing or throwing
+    EXPECT_EQ(config.GetPreferredIvshmemBarNum(), ivshmem::kDefaultIvshmemBarNum);
+}
+
 }  // namespace
 }  // namespace score::mw::com::gateway::qemu

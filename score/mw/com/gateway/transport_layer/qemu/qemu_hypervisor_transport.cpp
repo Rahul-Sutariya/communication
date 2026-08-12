@@ -45,6 +45,10 @@ ShmPaths ResolveInterVmShmPaths(const impl::InstanceSpecifier& specifier)
     // paths to the transport — either via an extended ProvideService API or by storing them
     // in a transport-accessible registry. For now, we construct paths from the specifier
     // string, which works for the integration test where paths are self-consistent.
+    // TODO: The path construction below is a temporary placeholder for integration testing.
+    // In production, GatewayCore must resolve the specifier via Runtime, extract the LoLa
+    // deployment info (service_id + instance_id), and supply the canonical ShmPathBuilder
+    // paths to the transport. Track in issue #TBD.
     const std::string base = std::string{"/intervm-shared-shmem/"} + std::string{specifier.ToString()};
     return ShmPaths{base + "/ctrl", base + "/data"};
 }
@@ -163,7 +167,13 @@ void QemuHypervisorTransport::OnMessageReceived(std::unique_ptr<TransportMessage
 
 void QemuHypervisorTransport::HandleProvideServiceRequest(std::unique_ptr<TransportMessage> message)
 {
-    auto& request = dynamic_cast<ProvideServiceRequest&>(*message);
+    auto* const request_ptr = dynamic_cast<ProvideServiceRequest*>(message.get());
+    if (request_ptr == nullptr)
+    {
+        log::LogError("LoLa") << "QemuTransport: message type mismatch in HandleProvideServiceRequest";
+        return;
+    }
+    auto& request = *request_ptr;
     auto specifier_result = impl::InstanceSpecifier::Create(std::string{request.GetInstanceSpecifier()});
     if (!specifier_result.has_value())
     {
@@ -176,7 +186,13 @@ void QemuHypervisorTransport::HandleProvideServiceRequest(std::unique_ptr<Transp
 
 void QemuHypervisorTransport::HandleStopOfferServiceRequest(std::unique_ptr<TransportMessage> message)
 {
-    auto& request = dynamic_cast<StopOfferServiceRequest&>(*message);
+    auto* const request_ptr = dynamic_cast<StopOfferServiceRequest*>(message.get());
+    if (request_ptr == nullptr)
+    {
+        log::LogError("LoLa") << "QemuTransport: message type mismatch in HandleStopOfferServiceRequest";
+        return;
+    }
+    auto& request = *request_ptr;
     auto specifier_result = impl::InstanceSpecifier::Create(std::string{request.GetInstanceSpecifier()});
     if (!specifier_result.has_value())
     {
@@ -188,7 +204,13 @@ void QemuHypervisorTransport::HandleStopOfferServiceRequest(std::unique_ptr<Tran
 
 void QemuHypervisorTransport::HandleOfferServiceRequest(std::unique_ptr<TransportMessage> message)
 {
-    auto& request = dynamic_cast<OfferServiceRequest&>(*message);
+    auto* const request_ptr = dynamic_cast<OfferServiceRequest*>(message.get());
+    if (request_ptr == nullptr)
+    {
+        log::LogError("LoLa") << "QemuTransport: message type mismatch in HandleOfferServiceRequest";
+        return;
+    }
+    auto& request = *request_ptr;
     auto specifier_result = impl::InstanceSpecifier::Create(std::string{request.GetInstanceSpecifier()});
     if (!specifier_result.has_value())
     {
@@ -200,7 +222,13 @@ void QemuHypervisorTransport::HandleOfferServiceRequest(std::unique_ptr<Transpor
 
 void QemuHypervisorTransport::HandleUpdateNotification(std::unique_ptr<TransportMessage> message)
 {
-    auto& notification = dynamic_cast<UpdateNotification&>(*message);
+    auto* const notification_ptr = dynamic_cast<UpdateNotification*>(message.get());
+    if (notification_ptr == nullptr)
+    {
+        log::LogError("LoLa") << "QemuTransport: message type mismatch in HandleUpdateNotification";
+        return;
+    }
+    auto& notification = *notification_ptr;
     auto specifier_result = impl::InstanceSpecifier::Create(std::string{notification.GetInstanceSpecifier()});
     if (!specifier_result.has_value())
     {
@@ -212,7 +240,13 @@ void QemuHypervisorTransport::HandleUpdateNotification(std::unique_ptr<Transport
 
 void QemuHypervisorTransport::HandleRegisterNotificationRequest(std::unique_ptr<TransportMessage> message)
 {
-    auto& request = dynamic_cast<RegisterNotificationRequest&>(*message);
+    auto* const request_ptr = dynamic_cast<RegisterNotificationRequest*>(message.get());
+    if (request_ptr == nullptr)
+    {
+        log::LogError("LoLa") << "QemuTransport: message type mismatch in HandleRegisterNotificationRequest";
+        return;
+    }
+    auto& request = *request_ptr;
     auto specifier_result = impl::InstanceSpecifier::Create(std::string{request.GetInstanceSpecifier()});
     if (!specifier_result.has_value())
     {
@@ -225,7 +259,13 @@ void QemuHypervisorTransport::HandleRegisterNotificationRequest(std::unique_ptr<
 
 void QemuHypervisorTransport::HandleUnregisterNotificationRequest(std::unique_ptr<TransportMessage> message)
 {
-    auto& request = dynamic_cast<UnregisterNotificationRequest&>(*message);
+    auto* const request_ptr = dynamic_cast<UnregisterNotificationRequest*>(message.get());
+    if (request_ptr == nullptr)
+    {
+        log::LogError("LoLa") << "QemuTransport: message type mismatch in HandleUnregisterNotificationRequest";
+        return;
+    }
+    auto& request = *request_ptr;
     auto specifier_result = impl::InstanceSpecifier::Create(std::string{request.GetInstanceSpecifier()});
     if (!specifier_result.has_value())
     {

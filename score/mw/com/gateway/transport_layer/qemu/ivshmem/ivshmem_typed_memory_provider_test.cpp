@@ -56,7 +56,7 @@ class TestableIvshmemTypedMemoryProvider : public IvshmemTypedMemoryProvider
     /// Populate the local allocation cache, enabling tests for GetAllocationOffset's found-branch.
     void InsertAllocation(const std::string& name, std::uint64_t offset) noexcept
     {
-        allocations_[name] = offset;
+        SetAllocationInCache(name, offset);
     }
 };
 
@@ -384,6 +384,7 @@ TEST(IvshmemQnxLookupOffsetTest, ReturnsOffsetWhenEntryFoundInDirectory)
     entry->name_hash = target_hash;
     entry->bar_offset = 8192U;
     entry->alloc_size = 4096U;
+    std::strncpy(entry->name, "/shm_target", IvshmemTypedMemoryProvider::kMaxNameLength - 1U);
 
     auto mman_mock = std::make_unique<::testing::StrictMock<score::os::qnx::MmanQnxMock>>();
     auto* const raw = mman_mock.get();
@@ -480,12 +481,14 @@ TEST(IvshmemQnxAllocateNamedTest, DirectoryHitBindsShm)
     // Given a directory with matching entry
     std::array<std::uint8_t, IvshmemTypedMemoryProvider::kDirectorySize> buf{};
     const std::uint32_t target_hash = IvshmemTypedMemoryProvider::HashName("/test_shm");
-    *reinterpret_cast<std::uint32_t*>(buf.data()) = 1U;
+    // Write count=1 at the correct header offset (lock_word is at offset 0, count at offset 4)
+    *reinterpret_cast<std::uint32_t*>(buf.data() + sizeof(std::uint32_t)) = 1U;
     auto* entry = reinterpret_cast<IvshmemTypedMemoryProvider::DirectoryEntry*>(
         buf.data() + IvshmemTypedMemoryProvider::kDirectoryHeaderSize);
     entry->name_hash = target_hash;
     entry->bar_offset = 4096U;
     entry->alloc_size = 4096U;
+    std::strncpy(entry->name, "/test_shm", IvshmemTypedMemoryProvider::kMaxNameLength - 1U);
 
     auto mman_mock = std::make_unique<::testing::StrictMock<score::os::qnx::MmanQnxMock>>();
     auto* const raw = mman_mock.get();
@@ -690,7 +693,7 @@ TEST(IvshmemQnxNullDirPathsTest, MmapAlwaysFailsCoversNullDirBranches)
     auto* const raw = mman_mock.get();
     TestableIvshmemTypedMemoryProvider p{0x100000U, 1024U * 1024U, std::move(mman_mock)};
 
-    // Expecting mmap to fail on every call and shm_open/shm_ctl to succeed
+    // Expecting mmap to fail; shm_open/shm_ctl must NOT be called since we return ENOMEM early.
     EXPECT_CALL(*raw,
                 mmap(nullptr,
                      IvshmemTypedMemoryProvider::kDirectorySize,
@@ -698,17 +701,15 @@ TEST(IvshmemQnxNullDirPathsTest, MmapAlwaysFailsCoversNullDirBranches)
                      ::testing::_,
                      ::testing::_,
                      ::testing::_))
-        .WillRepeatedly(::testing::Return(score::cpp::make_unexpected(score::os::Error::createFromErrno(ENOMEM))));
-    EXPECT_CALL(*raw, shm_open(::testing::_, ::testing::_, ::testing::_)).WillOnce(::testing::Return(std::int32_t{-2}));
-    EXPECT_CALL(*raw, shm_ctl(std::int32_t{-2}, ::testing::_, ::testing::_, ::testing::_))
-        .WillOnce(::testing::Return(std::int32_t{0}));
+        .WillOnce(::testing::Return(score::cpp::make_unexpected(score::os::Error::createFromErrno(ENOMEM))));
 
     // When allocating when mmap fails
     const auto result =
         p.AllocateNamedTypedMemory(4096U, "/test_shm", score::memory::shared::permission::WorldWritable{});
 
-    // Then allocation still succeeds using offset 0 from failed mmap paths
-    EXPECT_TRUE(result.has_value());
+    // Then allocation fails: without a mapped directory there is no safe place to record the
+    // allocation, so the provider returns ENOMEM rather than silently placing everything at offset 0.
+    EXPECT_FALSE(result.has_value());
 }
 
 TEST(IvshmemQnxWriteDirEntryTest, PrefilledNonMatchingEntriesLoopIteratesBeforeAppend)
@@ -776,7 +777,10 @@ TEST(IvshmemQnxLookupOffsetTest, OversizedCountAllocateCoversAllocateFindNextFre
     // Given directory buffer with oversized count and max entries
     std::array<std::uint8_t, IvshmemTypedMemoryProvider::kDirectorySize> buf{};
     FillDirectoryEntries(buf.data(), IvshmemTypedMemoryProvider::kMaxDirectoryEntries);
-    *reinterpret_cast<std::uint32_t*>(buf.data()) = IvshmemTypedMemoryProvider::kMaxDirectoryEntries + 5U;
+    // Write count at the correct header offset (count is at offset 4, not offset 0).
+    // offset 0 = lock_word, must stay 0 so the spinlock can be acquired.
+    *reinterpret_cast<std::uint32_t*>(buf.data() + sizeof(std::uint32_t)) =
+        IvshmemTypedMemoryProvider::kMaxDirectoryEntries + 5U;
 
     auto mman_mock = std::make_unique<::testing::StrictMock<score::os::qnx::MmanQnxMock>>();
     auto* const raw = mman_mock.get();
@@ -822,8 +826,8 @@ TEST(IvshmemTypedMemoryProviderStaticTest, MaxDirectoryEntriesFitsInDirectoryPag
 TEST(IvshmemTypedMemoryProviderStaticTest, DirectoryEntryHasExpectedSize)
 {
     // When checking DirectoryEntry struct size
-    // Then size equals 16 bytes
-    EXPECT_EQ(sizeof(IvshmemTypedMemoryProvider::DirectoryEntry), 16U);
+    // Then size equals 72 bytes: 4 (name_hash) + 4 (alloc_size) + 8 (bar_offset) + 56 (name)
+    EXPECT_EQ(sizeof(IvshmemTypedMemoryProvider::DirectoryEntry), 72U);
 }
 
 }  // namespace
