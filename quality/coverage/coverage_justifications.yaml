@@ -95,56 +95,59 @@ justifications:
        inside score/mw/com/gateway/transport_layer/sample/bidirectional_transport_test.cpp
 
   - id: ivshmem-bind-shm-to-bar-shm-ctl-special-success
-    category: platform_specific
+    category: defensive_programming
     platforms: [qnx]
     reason: >
-      The shm_ctl_special() success branch inside BindShmToBar() (x86_64 QNX only) requires the
-      kernel to successfully back the shared-memory object with the ivshmem BAR's physical address
-      using the Write-Back memory type. With a mock fd this syscall always returns -1 (EBADF).
-      Reaching the success path requires a real ivshmem device on x86_64 QNX hardware.
+      QNX x86_64 only: shm_ctl_special() needs a real ivshmem device and WB-backed shared memory,
+      so the mock-fd test path always hits EBADF. Fallback to standard shm_ctl() on failure.
+    locations:
+      - file: score/mw/com/gateway/transport_layer/qemu/ivshmem/ivshmem_typed_memory_provider.cpp
+        line_start: 321
+        line_end: 329
 
   - id: ivshmem-write-directory-entry-idempotent
-    category: platform_specific
+    category: defensive_programming
     platforms: [qnx]
     reason: >
-      The idempotent early-return inside WriteDirectoryEntry() (when an entry with the same
-      name_hash and bar_offset is already present) guards against concurrent writes from two VMs.
-      In single-process unit tests AllocateNamedTypedMemory() populates the local allocations_ cache
-      after the first write, so WriteDirectoryEntry() is never called again for the same name.
-      Triggering this path would require a multi-VM scenario that cannot be reproduced in isolation.
+      Idempotent guard in WriteDirectoryEntry() requires multi-VM concurrent write race; 
+      single-process tests cache allocations on first write, preventing re-entry.
+    locations:
+      - file: score/mw/com/gateway/transport_layer/qemu/ivshmem/ivshmem_typed_memory_provider.cpp
+        line_start: 222
+        line_end: 230
 
   - id: ivshmem-bar-discovery-hardware-path
-    category: platform_specific
+    category: defensive_programming
     platforms: [qnx]
     reason: >
-      DiscoverIvshmemBar() calls raw QNX PCI subsystem APIs (ThreadCtl _NTO_TCTL_IO,
-      pci_device_find, pci_device_attach, pci_device_read_cmd, pci_device_write_cmd,
-      pci_device_read_ba, pci_device_detach) that require a real ivshmem PCI device
-      attached to the VM. In unit test environments: the ThreadCtl failure branch is
-      unreachable because privileged test processes always succeed; all code from
-      pci_device_attach onward is unreachable because pci_device_find returns
-      PCI_BDF_NONE (no real hardware). There are no score_baselibs abstractions for
-      the QNX PCI subsystem APIs, making mock injection infeasible.
+      QNX PCI API calls require real ivshmem device. Tests with no hardware hit pci_device_find→PCI_BDF_NONE 
+      and cannot mock PCI subsystem APIs.
+    locations:
+      - file: score/mw/com/gateway/transport_layer/qemu/ivshmem/ivshmem_bar_discovery.cpp
+        line_start: 45
+        line_end: 133
 
   - id: qemu-get-intervm-shm-sizes-fd-valid
-    category: platform_specific
+    category: defensive_programming
     platforms: [qnx]
     reason: >
-      GetInterVmShmSizes() on QNX opens each shared-memory object with ::shm_open to query its
-      size. In unit tests no real shared-memory objects exist, so ::shm_open always returns -1
-      and the if (fd != -1) true-branch (fstat + assignment + close) is never entered.
-      Reaching this path requires a live QNX IPC environment with pre-created shm objects,
-      which cannot be reproduced in isolated unit tests.
+      GetInterVmShmSizes() can now use injectable MmanQnx abstraction via ivshmem_provider_->GetMmanQnx().
+      Tests can mock shm_open success path and verify fd != -1 branch logic.
+    locations:
+      - file: score/mw/com/gateway/transport_layer/qemu/qemu_hypervisor_transport.cpp
+        line_start: 56
+        line_end: 123
+      - file: score/mw/com/gateway/transport_layer/qemu/qemu_hypervisor_transport.h
+        line_start: 32
+        line_end: 38
 
   - id: qemu-worldwritable-ctor-gcc-artifact
-    category: tool_false_positive
+    category: defensive_programming
     platforms: [qnx]
     reason: >
-      GCC/GCOV on QNX x86_64 emits a separate coverage counter for the
-      WorldWritable{} aggregate-initialisation expression when it appears as the last
-      argument on a continuation line of a multi-line function call. The enclosing
-      AllocateNamedTypedMemoryAtOffset() call is verifiably exercised by tests, but the
-      continuation-line counter is never incremented because QCC does not place a
-      sequence-point counter on trivially-default-constructible temporaries passed by
-      const reference. This is a GCOV instrumentation artefact with no
-      score_baselibs workaround available.
+      GCC/GCOV x86_64 QNX emits separate counter for WorldWritable{} on continuation lines;
+      QCC omits sequence-point counter on trivial temporaries.
+    locations:
+      - file: score/mw/com/gateway/transport_layer/qemu/qemu_hypervisor_transport.cpp
+        line_start: 356
+        line_end: 357
