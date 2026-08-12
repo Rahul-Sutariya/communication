@@ -59,14 +59,14 @@ auto ParseQemuTransportConfig(score::json::Any json) noexcept -> QemuTransportCo
     const auto& obj = top_level_object.value().get();
 
     std::uint32_t preferred_bar_num = ivshmem::kDefaultIvshmemBarNum;
-    const auto ivshmem_entry = obj.find(kIvshmemConfigurationKey.data());
+    const auto ivshmem_entry = obj.find(kIvshmemConfigurationKey);
     if (ivshmem_entry != obj.cend())
     {
         const auto ivshmem_obj_result = ivshmem_entry->second.As<score::json::Object>();
         if (ivshmem_obj_result.has_value())
         {
             const auto& ivshmem_obj = ivshmem_obj_result.value().get();
-            const auto preferred_bar_num_entry = ivshmem_obj.find(kPreferredBarNumKey.data());
+            const auto preferred_bar_num_entry = ivshmem_obj.find(kPreferredBarNumKey);
             if (preferred_bar_num_entry != ivshmem_obj.cend())
             {
                 const auto preferred_bar_num_result = preferred_bar_num_entry->second.As<std::uint32_t>();

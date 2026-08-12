@@ -44,8 +44,8 @@ namespace score::mw::com::gateway::qemu::ivshmem
 /// - [0 .. usable_end): shm data regions (allocated by either VM)
 /// - [usable_end .. usable_end + kDirectorySize): allocation directory (shared, both VMs)
 ///
-/// Both VMs share a single allocation space with no partitioning. The directory acts as a
-/// shared atomic allocator:
+/// Both VMs share a single allocation space with no partitioning. A shared lock in the
+/// directory serializes cross-VM access so the directory acts as a shared allocator:
 /// - **Source side** (AllocateNamedTypedMemory): scans all directory entries to find the
 ///   next free offset (after the highest existing allocation), writes a new entry, and
 ///   binds the QNX shm object to that BAR sub-range.
@@ -160,9 +160,12 @@ class IvshmemTypedMemoryProvider : public score::memory::shared::TypedMemory
     /// @brief Size of the directory region reserved at the end of the usable BAR.
     static constexpr std::uint64_t kDirectorySize = 4096U;
 
-    /// @brief Maximum directory entries (first 4 bytes = entry count, rest = entries).
+    /// @brief Size of the directory header (cross-VM lock + entry count).
+    static constexpr std::uint64_t kDirectoryHeaderSize = sizeof(std::uint32_t) * 2U;
+
+    /// @brief Maximum directory entries (header + entries fit in one page).
     static constexpr std::uint32_t kMaxDirectoryEntries =
-        (kDirectorySize - sizeof(std::uint32_t)) / sizeof(DirectoryEntry);
+        (kDirectorySize - kDirectoryHeaderSize) / sizeof(DirectoryEntry);
 
     /// FNV-1a 32-bit hash algorithm offset basis
     static constexpr std::uint32_t kFnvOffsetBasis = 2166136261U;
@@ -224,7 +227,7 @@ class IvshmemTypedMemoryProvider : public score::memory::shared::TypedMemory
     std::uint64_t usable_size_;  ///< size - kDirectorySize (space for shm allocations)
 #endif
 
-    mutable std::mutex mutex_;  ///< protects directory operations across VMs
+    mutable std::mutex mutex_;  ///< protects the local per-process allocation cache
 };
 
 }  // namespace score::mw::com::gateway::qemu::ivshmem
