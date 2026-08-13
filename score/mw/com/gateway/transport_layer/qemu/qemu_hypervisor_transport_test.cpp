@@ -659,14 +659,13 @@ TEST_F(QemuHypervisorTransportTest, GetInterVmShmSizesReturnsZeroOnNonQnx)
 #endif  // !defined(__QNXNTO__)
 
 #if defined(__QNXNTO__)
-TEST_F(QemuHypervisorTransportTest, GetInterVmShmSizesWithCertifiedMmanQnxHandlesSuccess)
+TEST_F(QemuHypervisorTransportTest, GetInterVmShmSizesWithMmanQnxHandlesSuccess)
 {
-    // Demonstrates the certified MmanQnx abstraction allows testing the fd != -1 success path.
-    // Given a mock that returns a valid fd for shm_open
+    // Given a mock that returns valid fds for shm_open.
     auto mman_mock = std::make_unique<::testing::StrictMock<score::os::qnx::MmanQnxMock>>();
     auto* const raw = mman_mock.get();
 
-    // Expecting shm_open to succeed for both CTRL and DATA shm with certified MmanQnx
+    // When GetInterVmShmSizes opens the CTRL and DATA shm objects.
     EXPECT_CALL(
         *raw,
         shm_open(::testing::StrEq("/intervm-shared-shmem/SpeedService/Instance42/ctrl"), ::testing::_, ::testing::_))
@@ -676,13 +675,12 @@ TEST_F(QemuHypervisorTransportTest, GetInterVmShmSizesWithCertifiedMmanQnxHandle
         shm_open(::testing::StrEq("/intervm-shared-shmem/SpeedService/Instance42/data"), ::testing::_, ::testing::_))
         .WillOnce(::testing::Return(std::int32_t{11}));  // Return a valid fd
 
-    // When calling GetInterVmShmSizes with the certified MmanQnx mock
     const auto specifier = CreateValidInstanceSpecifier();
     const auto sizes = GetInterVmShmSizes(specifier, raw);
 
-    // Then the function attempts to query sizes via fstat (mocked externally)
-    // The test validates that the fd != -1 branch is entered when shm_open succeeds.
-    // Note: fstat behavior is external to this unit and would be mocked by the test framework.
+    // Then the fstat path reports zero sizes for the fake fds.
+    EXPECT_EQ(sizes.control, 0U);
+    EXPECT_EQ(sizes.data, 0U);
 }
 #endif  // defined(__QNXNTO__)
 

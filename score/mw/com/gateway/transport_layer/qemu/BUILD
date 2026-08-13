@@ -46,5 +46,8 @@ cc_unit_test(
         "//score/mw/com/gateway/transport_layer/sample:bidirectional_transport_mock",
         "@score_baselibs//score/mw/log",
         "@score_baselibs//score/mw/log:recorder_mock",
-    ],
+    ] + select({
+        "@platforms//os:qnx": ["@score_baselibs//score/os/mocklib/qnx:mman_mock"],
+        "//conditions:default": [],
+    }),
 )
