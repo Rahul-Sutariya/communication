@@ -302,19 +302,19 @@ score::ResultBlank QemuHypervisorTransport::ProvideService(impl::InstanceSpecifi
 #endif
 
     ProvideServiceRequest request{
-        std::move(service_instance_specifier), std::move(service_elements), shm_sizes.control, shm_sizes.data};
+        service_instance_specifier, std::move(service_elements), shm_sizes.control, shm_sizes.data};
     return message_transport_->SendRequest(request);
 }
 
 score::ResultBlank QemuHypervisorTransport::OfferService(impl::InstanceSpecifier service_instance_specifier)
 {
-    OfferServiceRequest request{std::move(service_instance_specifier)};
+    OfferServiceRequest request{service_instance_specifier};
     return message_transport_->SendRequest(request);
 }
 
 score::ResultBlank QemuHypervisorTransport::StopOfferService(impl::InstanceSpecifier service_instance_specifier)
 {
-    StopOfferServiceRequest request{std::move(service_instance_specifier)};
+    StopOfferServiceRequest request{service_instance_specifier};
     return message_transport_->SendRequest(request);
 }
 
@@ -323,7 +323,7 @@ score::ResultBlank QemuHypervisorTransport::NotifyUpdate(impl::InstanceSpecifier
                                                          std::string updated_element_name)
 {
     UpdateNotification notification{
-        std::move(service_instance_specifier), updated_element_type, std::move(updated_element_name)};
+        service_instance_specifier, updated_element_type, std::move(updated_element_name)};
     return message_transport_->SendNotification(notification);
 }
 
@@ -332,7 +332,7 @@ score::ResultBlank QemuHypervisorTransport::RegisterUpdateNotification(
     impl::ServiceElementType element_type,
     std::string element_name)
 {
-    RegisterNotificationRequest request{std::move(service_instance_specifier), element_type, std::move(element_name)};
+    RegisterNotificationRequest request{service_instance_specifier, element_type, std::move(element_name)};
     return message_transport_->SendRequest(request);
 }
 
@@ -341,7 +341,7 @@ score::ResultBlank QemuHypervisorTransport::UnregisterUpdateNotification(
     impl::ServiceElementType element_type,
     std::string element_name)
 {
-    UnregisterNotificationRequest request{std::move(service_instance_specifier), element_type, std::move(element_name)};
+    UnregisterNotificationRequest request{service_instance_specifier, element_type, std::move(element_name)};
     return message_transport_->SendRequest(request);
 }
 
