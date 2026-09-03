@@ -16,11 +16,7 @@ Subclasses the upstream :class:`Qemu` and overrides :meth:`_extra_qemu_args` to 
 the ivshmem, inter-VM NIC, and per-VM MAC arguments.
 """
 
-import logging
-
 from score.itf.plugins.qemu.qemu import Qemu
-
-logger = logging.getLogger(__name__)
 
 
 class IvshmemQemu(Qemu):
@@ -31,6 +27,9 @@ class IvshmemQemu(Qemu):
         path_to_image,
         ram="1G",
         cores="2",
+        machine="pc-x86_64",
+        rootfs=None,
+        kernel_cmdline=None,
         port_forwarding=[],
         ivshmem_path=None,
         ivshmem_size="4M",
@@ -49,13 +48,18 @@ class IvshmemQemu(Qemu):
         self._intervm = intervm
         self._vm_index = vm_index
         self._dual_port_forwarding = port_forwarding
-        # Pass port_forwarding=[] to the base so it doesn't add default-MAC devices.
-        # We handle port forwarding ourselves in _extra_qemu_args with per-VM MACs.
-        super().__init__(path_to_image, ram, cores, cpu="host", port_forwarding=[])
-        # Re-resolve: "host" is invalid under TCG, fall back to "max".
-        if self._accelerator_support == "tcg":
-            self._Qemu__cpu = "max"
-            logger.warning("Running under TCG: using -cpu max instead of host.")
+        # Pass network_adapters/port_forwarding=[] to the base: it has no host tap devices to
+        # attach, and we handle port forwarding ourselves in _extra_qemu_args with per-VM MACs.
+        super().__init__(
+            path_to_image,
+            ram,
+            cores,
+            machine=machine,
+            network_adapters=[],
+            port_forwarding=[],
+            rootfs=rootfs,
+            kernel_cmdline=kernel_cmdline,
+        )
 
     def _extra_qemu_args(self):
         """Inject ivshmem, per-VM-MAC port forwarding, and inter-VM NIC arguments."""
