@@ -111,7 +111,10 @@ class IvshmemQemu(Qemu):
             return []
         mode, host_port = self._intervm
         if mode == "listen":
-            netdev = f"stream,id=intervm,server=on,addr.type=inet,addr.host=0.0.0.0,addr.port={host_port}"
+            # Loopback-only: the connect side below also targets 127.0.0.1, and a
+            # wildcard bind is unnecessary and can be more restricted by CI network
+            # sandboxing than a loopback bind.
+            netdev = f"stream,id=intervm,server=on,addr.type=inet,addr.host=127.0.0.1,addr.port={host_port}"
         else:
             # reconnect=1: unlike the legacy "socket" netdev (one-shot connect), the
             # "stream" netdev backend retries every second, so it transparently
