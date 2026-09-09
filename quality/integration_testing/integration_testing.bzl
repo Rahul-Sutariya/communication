@@ -239,10 +239,16 @@ def dual_qemu_integration_test(
     # This test is intentionally marked flaky (above) to retry environment-induced
     # QEMU boot hiccups, so exclude it from the nightly flaky-test detection to
     # avoid reporting expected, infrastructure-level nondeterminism.
+    #
+    # All dual-QEMU configs bind fixed host ports (SSH hostfwd, ivshmem/intervm), and
+    # tests run with real host networking (see `--nosandbox_default_allow_network` in
+    # .bazelrc), so two instances (another run of this test, or a different qemu/dual_qemu
+    # test) running at the same time would race for the same ports and fail. Mark
+    # exclusive so bazel never schedules more than one at a time on a given machine.
     _extend_list_in_kwargs_without_duplicates(
         kwargs,
         "tags",
-        ["no-flaky-test-detection"],
+        ["no-flaky-test-detection", "exclusive"],
     )
 
     _extend_list_in_kwargs_without_duplicates(
