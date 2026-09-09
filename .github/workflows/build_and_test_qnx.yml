@@ -136,6 +136,17 @@ jobs:
           uses: ./.github/actions/00_infrastructure/setup_qnx_environment
           with:
             qnx-license: ${{ secrets.SCORE_QNX_LICENSE }}
+        - name: Diagnose KVM availability
+          run: |
+            echo "--- /dev/kvm ---"
+            ls -l /dev/kvm || echo "/dev/kvm not present"
+            echo "--- CPU virtualization flags ---"
+            grep -Eo 'vmx|svm' /proc/cpuinfo | sort -u || echo "no vmx/svm flags found"
+            echo "--- kvm-ok ---"
+            sudo apt-get install -y cpu-checker >/dev/null 2>&1 || true
+            kvm-ok || true
+            echo "--- nproc ---"
+            nproc
         - name: Setup Bazel environment
           uses: ./.github/actions/00_infrastructure/prepare_bazel_environment
           with:
@@ -154,7 +165,13 @@ jobs:
           env:
             SCORE_QNX_USER: ${{ secrets.SCORE_QNX_USER }}
             SCORE_QNX_PASSWORD: ${{ secrets.SCORE_QNX_PASSWORD }}
-          run: bazel test --config=ci --config=qnx -- //score/...
+          # Dual-QEMU boot (see dual_qemu_process.py) can be much slower on GitHub-hosted
+          # runners; raise its self-healing boot budget beyond the 60s/3-attempt default.
+          run: >
+            bazel test --config=ci --config=qnx
+            --test_env=DUAL_QEMU_BOOT_TIMEOUT_S=150
+            --test_env=DUAL_QEMU_MAX_BOOT_ATTEMPTS=3
+            -- //score/...
         - name: Upload failed Bazel test logs
           if: inputs.fetch_only != 'true' && failure() && steps.run-tests.outcome == 'failure'
           uses: ./.github/actions/00_infrastructure/upload_bazel_testlogs_on_failure
