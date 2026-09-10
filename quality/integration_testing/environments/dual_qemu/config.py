@@ -58,10 +58,12 @@ class DualQemuConfigModel(BaseModel):
 
     ivshmem: IvshmemConfig = Field(default_factory=IvshmemConfig)
     intervm_network: InterVmNetwork = Field(default_factory=InterVmNetwork)
-    # Replace each VM's ``ssh_port`` (and its matching port-forwarding entry) with a free
-    # host port at session start. ``QemuConfigModel.ssh_port`` is mandatory and must be
-    # >= 1, so the JSON still needs a placeholder; it is ignored unless this is false.
-    auto_ssh_ports: bool = True
+    # Guest CPU model for both VMs. score_itf hardcodes "Cascadelake-Server-v5" and reads no
+    # configuration, so on a host lacking those Intel features QEMU silently strips them and
+    # the guest CPUID ends up depending on which runner picked up the job. "Nehalem" is old
+    # enough that every x86_64 host supports it in full, so every run sees the same CPU. Set
+    # this to "max" instead to get the host's full feature set at the cost of that determinism.
+    qemu_cpu: str = "Nehalem"
     vms: list[QemuConfigModel] = Field(min_length=2, max_length=2)
 
 

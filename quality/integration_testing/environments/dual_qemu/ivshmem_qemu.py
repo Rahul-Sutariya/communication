@@ -40,6 +40,7 @@ class IvshmemQemu(Qemu):
         ivshmem_size="4M",
         intervm=None,
         vm_index=0,
+        cpu=None,
     ):
         """
         :param str ivshmem_path: Host backing file shared between VMs (memory-backend-file).
@@ -47,11 +48,13 @@ class IvshmemQemu(Qemu):
         :param tuple intervm: Optional ("listen"|"connect", host_port) for a point-to-point
             socket NIC between the two VMs. ``None`` disables it.
         :param int vm_index: Zero-based VM index, used to derive unique NIC MACs.
+        :param str cpu: Guest CPU model. ``None`` keeps the base class's hardcoded one.
         """
         self._ivshmem_path = ivshmem_path
         self._ivshmem_size = ivshmem_size
         self._intervm = intervm
         self._vm_index = vm_index
+        self._cpu = cpu
         network_adapters = network_adapters if network_adapters is not None else []
         self._network_adapters = network_adapters
         self._dual_port_forwarding = port_forwarding
@@ -69,8 +72,23 @@ class IvshmemQemu(Qemu):
         )
 
     def _extra_qemu_args(self):
-        """Inject ivshmem, per-VM-MAC port forwarding, and inter-VM NIC arguments."""
-        return self._ivshmem_args() + self._port_forwarding_with_mac_args() + self._intervm_args()
+        """Inject CPU model, ivshmem, per-VM-MAC port forwarding, and inter-VM NIC arguments."""
+        return (
+            self._cpu_args() + self._ivshmem_args() + self._port_forwarding_with_mac_args() + self._intervm_args()
+        )
+
+    def _cpu_args(self):
+        """Pin the guest CPU model, overriding the one the base class hardcodes.
+
+        ``Qemu`` always asks for ``Cascadelake-Server-v5`` and exposes no way to change it, so
+        a host without those Intel features gets them stripped -- one
+        "host doesn't support requested feature" warning per bit, and a guest CPUID that
+        differs between runners. QEMU keeps the *last* ``-cpu`` on the command line, so
+        appending one here overrides the base's without reaching into its private machine table.
+        """
+        if not self._cpu:
+            return []
+        return ["-cpu", self._cpu]
 
     def _ivshmem_args(self):
         if not self._ivshmem_path:
