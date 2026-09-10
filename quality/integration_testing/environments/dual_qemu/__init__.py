@@ -34,7 +34,12 @@ import pytest
 from score.itf.core.utils.bunch import Bunch
 
 from .config import load_configuration, parse_size
-from .dual_qemu_process import DualQemuProcess, execute_async_with_retries, stop_quietly
+from .dual_qemu_process import (
+    DualQemuProcess,
+    ensure_all_responsive,
+    execute_async_with_retries,
+    stop_quietly,
+)
 
 __all__ = ["execute_async_with_retries", "stop_quietly"]
 
@@ -129,8 +134,9 @@ def _targets(config, ivshmem_backend):
             intervm=intervm_roles[1],
             vm_index=1,
         ) as process_b:
-            # Re-verify VM-A is still responsive (it may have gone quiet while VM-B booted).
-            process_a.ensure_responsive()
+            # Either VM may have gone quiet while the other booted, and healing one idles
+            # the other for a whole boot, so this probes and re-probes until both are up.
+            ensure_all_responsive([process_a, process_b])
             yield [process_a.target, process_b.target]
 
 
