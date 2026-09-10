@@ -19,6 +19,7 @@ The ``start()`` method is self-healing: it waits for stable SSH and restarts the
 process up to ``max_boot_attempts`` times if sshd never comes up.
 """
 
+import concurrent.futures
 import logging
 import time
 
@@ -94,6 +95,39 @@ def stop_quietly(process, label: str = ""):
         process.stop()
     except Exception as ex:  # pylint: disable=broad-except
         logger.warning("Could not stop remote process %s cleanly (%s)", label, ex)
+
+
+def _unresponsive(processes):
+    """Return the VMs that are not currently serving SSH.
+
+    The probes only read, so running them concurrently is safe and keeps a slow one from
+    adding idle time to its peer -- idle time is exactly what wedges this guest's sshd.
+    """
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(processes)) as pool:
+        healthy = pool.map(lambda process: process.is_responsive(), processes)
+        return [process for process, is_healthy in zip(processes, healthy) if not is_healthy]
+
+
+def ensure_all_responsive(processes, max_heal_rounds: int = 2):
+    """Bring every VM to a responsive state, re-probing after each round of restarts.
+
+    A single probe-then-heal pass is not enough: ``self_heal`` costs a full boot plus the
+    stable-SSH wait, and the peer sits idle for all of it, which is what knocks this guest's
+    sshd out in the first place. So healing one VM routinely breaks the other. Keep going
+    until a round finds nothing left to heal.
+    """
+    for _ in range(max_heal_rounds):
+        unhealthy = _unresponsive(processes)
+        if not unhealthy:
+            return
+        for process in unhealthy:
+            process.self_heal()
+    still_unhealthy = _unresponsive(processes)
+    if still_unhealthy:
+        raise RuntimeError(
+            f"{len(still_unhealthy)} of {len(processes)} VMs still unresponsive after "
+            f"{max_heal_rounds} self-heal rounds"
+        )
 
 
 class DualQemuProcess(QemuProcess):
@@ -177,13 +211,19 @@ class DualQemuProcess(QemuProcess):
             f"VM never booted into a usable state after {self._max_boot_attempts} attempts: {last_error}"
         )
 
-    def ensure_responsive(self, timeout: int = 30, stable_successes: int = 2):
-        """Re-verify the VM is still reachable; restart in place if not."""
+    def is_responsive(self, timeout: int = 60, stable_successes: int = 2) -> bool:
+        """Read-only SSH reachability probe; never restarts, so it is safe to run concurrently."""
         try:
             _wait_for_ssh(self._target, total_timeout=timeout, stable_successes=stable_successes)
-        except Exception as ex:  # pylint: disable=broad-except
-            logger.warning("VM went unresponsive (%s); restarting", ex)
-            self.restart()
+            return True
+        except TimeoutError:
+            return False
+
+    def self_heal(self):
+        """Restart the VM, reusing ``start()``'s boot-retry and readiness wait."""
+        logger.warning("VM went unresponsive; restarting to self-heal")
+        self.stop()
+        self.start()
 
     @property
     def target(self):
