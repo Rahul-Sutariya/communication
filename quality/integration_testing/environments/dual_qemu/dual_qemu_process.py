@@ -15,8 +15,8 @@
 Subclasses ``QemuProcess`` and replaces its internal ``_qemu`` with an
 :class:`IvshmemQemu` instance so the VM is launched with an ``ivshmem-plain`` device.
 
-The ``start()`` method is self-healing: it waits for stable SSH, runs ``pre_tests_phase``,
-and restarts the QEMU process up to ``max_boot_attempts`` times if sshd never comes up.
+The ``start()`` method is self-healing: it waits for stable SSH, runs a minimal readiness
+check, and restarts the QEMU process up to ``max_boot_attempts`` times if sshd never comes up.
 
 All timeouts/retry counts below can be overridden via environment variables (e.g. via Bazel's
 ``--test_env``) without a code change, for CI hosts where nested virtualization makes the
@@ -27,7 +27,6 @@ import logging
 import os
 import time
 
-from score.itf.plugins.qemu.checks import pre_tests_phase
 from score.itf.plugins.qemu.qemu_process import QemuProcess
 from score.itf.plugins.qemu.qemu_target import QemuTarget
 
@@ -141,7 +140,7 @@ class DualQemuProcess(QemuProcess):
             try:
                 self._target = QemuTarget(self, self._vm_config)
                 _wait_for_ssh(self._target, total_timeout=self._boot_timeout)
-                self._pre_tests_phase_with_retries()
+                self._verify_ready()
                 return self
             except Exception as ex:  # pylint: disable=broad-except
                 last_error = ex
@@ -162,32 +161,18 @@ class DualQemuProcess(QemuProcess):
             f"VM never booted into a usable state after {self._max_boot_attempts} attempts: {last_error}"
         )
 
-    def _pre_tests_phase_with_retries(self, attempts=None, retry_delay_s=5):
-        """Runs ``pre_tests_phase`` with its own short retry loop.
+    def _verify_ready(self):
+        """Confirms the VM is ready without reopening SSH.
 
-        ``pre_tests_phase`` (upstream) opens fresh SSH/SFTP connections after the VM already
-        proved reachable in ``_wait_for_ssh``. This guest's sshd can occasionally refuse a
-        *new* connection right after serving one (see ``_wait_for_ssh`` docstring above), so a
-        failure here is usually a cheap reconnect flake, not a real boot problem. Retrying in
-        place avoids discarding an already-healthy VM and rebooting it from scratch.
+        Deliberately does *not* call upstream ``pre_tests_phase``: its SSH/SFTP checks each
+        open a brand-new connection, and this guest's sshd can refuse a *new* connection right
+        after serving one (see ``_wait_for_ssh`` docstring above) -- ``_wait_for_ssh`` already
+        proved SSH works, so re-checking it here only adds another chance to hit that wedge.
+        The ping check is ICMP-based and does not touch sshd at all.
         """
-        attempts = attempts or _env_int("DUAL_QEMU_PRE_TESTS_PHASE_ATTEMPTS", 5)
-        last_error = None
-        for attempt in range(1, attempts + 1):
-            try:
-                pre_tests_phase(self._target)
-                return
-            except Exception as ex:  # pylint: disable=broad-except
-                last_error = ex
-                logger.warning(
-                    "pre_tests_phase attempt %d/%d failed (%s); the VM is still up, retrying",
-                    attempt,
-                    attempts,
-                    ex,
-                )
-                if attempt < attempts:
-                    time.sleep(retry_delay_s)
-        raise last_error
+        timeout = _env_int("DUAL_QEMU_PING_TIMEOUT_S", 10)
+        assert self._target.ping(timeout=timeout), "Target is not pingable within expected time frame"
+        logger.info("Check target ping: OK")
 
     def is_responsive(self, timeout: int = None, stable_successes: int = 2) -> bool:
         """Read-only SSH reachability probe (no restart); safe to run concurrently for both VMs."""
@@ -199,7 +184,7 @@ class DualQemuProcess(QemuProcess):
             return False
 
     def self_heal(self):
-        """Restart the VM, reusing start()'s own boot-retry + pre_tests_phase loop.
+        """Restart the VM, reusing start()'s own boot-retry + readiness-check loop.
 
         A VM that already passed ``start()`` can still stop serving sshd while it sits idle
         during the peer's boot (see qnx-qemu-networking notes); one restart recovers it without

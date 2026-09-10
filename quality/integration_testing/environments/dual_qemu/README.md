@@ -27,8 +27,11 @@ socket-based control plane, so the data plane only needs plain shared memory.
 | `ivshmem_backend`  | session | Path of the shared host backing file.                   |
 | `config`           | session | Loaded `DualQemuConfigModel` + `qemu_image`.            |
 
-Both VMs run the upstream `pre_tests_phase` checks (ping / SSH / SFTP) before the tests
-start.
+Both VMs are verified with a stable-SSH wait (see `dual_qemu_process._wait_for_ssh`) plus a
+ping-only readiness check, before the tests start. Unlike the upstream `qemu` plugin's
+`pre_tests_phase`, this deliberately skips re-checking SSH/SFTP after boot: this guest's
+sshd can refuse a *new* connection right after serving one, so re-validating it here would
+just add another chance to hit that wedge.
 
 ### Boot reliability
 
@@ -38,8 +41,8 @@ boot path, so its `sshd` never comes up and QEMU's SLIRP resets the harness conn
 To keep the test reliable the plugin:
 
 - boots the VMs **sequentially** — it starts a VM, waits until SSH is *stably* reachable
-  and runs `pre_tests_phase`, and only then starts the next one, so the two guests never
-  initialise their devices at the same time;
+  and runs a ping-only readiness check, and only then starts the next one, so the two
+  guests never initialise their devices at the same time;
 - gives each VM a single core and a **distinct NIC MAC**;
 - the `dual_qemu_integration_test` macro additionally marks the test `flaky = True` so
   bazel transparently retries the rare residual KVM boot hiccup.

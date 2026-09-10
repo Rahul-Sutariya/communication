@@ -68,7 +68,7 @@ def _launch_with_retry(target, binary, label, grace_period_s=20, restart_attempt
 
     A VM's sshd can go idle-dead at any point (not just during fixture setup, see
     qnx-qemu-networking notes). A short blip often clears on its own, so retry once after a
-    grace wait before resorting to target.restart() (a full reboot + pre_tests_phase), which
+    grace wait before resorting to target.restart() (a full reboot + readiness check), which
     re-runs DualQemuProcess's self-healing boot.
     """
     try:

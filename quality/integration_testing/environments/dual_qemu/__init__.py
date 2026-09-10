@@ -13,9 +13,11 @@
 """Pytest plugin that boots **two** QNX QEMU VMs sharing a QEMU ``ivshmem`` region.
 
 It is a thin extension of the single-VM ``qemu`` plugin
-(``@score_itf//score/itf/plugins/qemu``): it reuses ``QemuTarget`` / ``pre_tests_phase``
-and only adds (a) a second VM, (b) an ``ivshmem-plain`` device backed by one shared host
-file, and (c) distinct host SSH ports per VM.
+(``@score_itf//score/itf/plugins/qemu``): it reuses ``QemuTarget`` and only adds (a) a
+second VM, (b) an ``ivshmem-plain`` device backed by one shared host file, and (c) distinct
+host SSH ports per VM. Unlike the upstream plugin, readiness is verified with a ping-only
+check (see ``dual_qemu_process._verify_ready``) instead of ``pre_tests_phase``, to avoid
+reopening SSH/SFTP connections after boot.
 
 Exposed session fixtures:
     - ``target_a`` / ``target_b`` -- the two booted VMs (``QemuTarget``).
