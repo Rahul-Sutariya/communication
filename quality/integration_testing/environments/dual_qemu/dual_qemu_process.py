@@ -141,7 +141,7 @@ class DualQemuProcess(QemuProcess):
             try:
                 self._target = QemuTarget(self, self._vm_config)
                 _wait_for_ssh(self._target, total_timeout=self._boot_timeout)
-                pre_tests_phase(self._target)
+                self._pre_tests_phase_with_retries()
                 return self
             except Exception as ex:  # pylint: disable=broad-except
                 last_error = ex
@@ -161,6 +161,33 @@ class DualQemuProcess(QemuProcess):
         raise RuntimeError(
             f"VM never booted into a usable state after {self._max_boot_attempts} attempts: {last_error}"
         )
+
+    def _pre_tests_phase_with_retries(self, attempts=None, retry_delay_s=5):
+        """Runs ``pre_tests_phase`` with its own short retry loop.
+
+        ``pre_tests_phase`` (upstream) opens fresh SSH/SFTP connections after the VM already
+        proved reachable in ``_wait_for_ssh``. This guest's sshd can occasionally refuse a
+        *new* connection right after serving one (see ``_wait_for_ssh`` docstring above), so a
+        failure here is usually a cheap reconnect flake, not a real boot problem. Retrying in
+        place avoids discarding an already-healthy VM and rebooting it from scratch.
+        """
+        attempts = attempts or _env_int("DUAL_QEMU_PRE_TESTS_PHASE_ATTEMPTS", 5)
+        last_error = None
+        for attempt in range(1, attempts + 1):
+            try:
+                pre_tests_phase(self._target)
+                return
+            except Exception as ex:  # pylint: disable=broad-except
+                last_error = ex
+                logger.warning(
+                    "pre_tests_phase attempt %d/%d failed (%s); the VM is still up, retrying",
+                    attempt,
+                    attempts,
+                    ex,
+                )
+                if attempt < attempts:
+                    time.sleep(retry_delay_s)
+        raise last_error
 
     def is_responsive(self, timeout: int = None, stable_successes: int = 2) -> bool:
         """Read-only SSH reachability probe (no restart); safe to run concurrently for both VMs."""
