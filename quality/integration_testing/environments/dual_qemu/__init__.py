@@ -111,6 +111,7 @@ def _targets(config, ivshmem_backend):
         ivshmem_size=dual_config.ivshmem.size,
         intervm=intervm_roles[0],
         vm_index=0,
+        cpu=dual_config.qemu_cpu,
     ) as process_a:
         with DualQemuProcess(
             config.qemu_images[1],
@@ -122,6 +123,7 @@ def _targets(config, ivshmem_backend):
             ivshmem_size=dual_config.ivshmem.size,
             intervm=intervm_roles[1],
             vm_index=1,
+            cpu=dual_config.qemu_cpu,
         ) as process_b:
             # Re-verify VM-A is still responsive (it may have gone quiet while VM-B booted).
             process_a.ensure_responsive()

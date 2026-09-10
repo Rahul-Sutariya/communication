@@ -82,6 +82,7 @@ class DualQemuProcess(QemuProcess):
         vm_index=0,
         max_boot_attempts=3,
         boot_timeout=180,
+        cpu=None,
     ):
         super().__init__(
             path_to_qemu_image,
@@ -104,6 +105,7 @@ class DualQemuProcess(QemuProcess):
             ivshmem_size=ivshmem_size,
             intervm=intervm,
             vm_index=vm_index,
+            cpu=cpu,
         )
         self._vm_config = vm_config
         self._max_boot_attempts = max_boot_attempts
