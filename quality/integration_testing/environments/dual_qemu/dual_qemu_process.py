@@ -71,6 +71,43 @@ def _wait_for_ssh(
     raise TimeoutError(f"VM never became stably reachable via SSH within {total_timeout}s: {last_error}")
 
 
+def execute_async_with_retries(target, binary_path, attempts: int = 3, ssh_recovery_timeout_s: int = 30, **kwargs):
+    """Launch ``binary_path`` on ``target``, retrying if the SSH session collapses.
+
+    ``QemuTarget.execute_async`` opens a *brand-new* SSH connection per launch, and this guest
+    can refuse or drop one shortly after serving another (see ``_wait_for_ssh``); in CI that
+    surfaces as ``SSH connection ... failed`` or ``EOFError`` from ``exec_command``. Both abort
+    before the remote shell reports its PID, so there is no process handle left to reclaim and
+    waiting for sshd to settle before dialling again is the cheapest recovery.
+    """
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        if attempt > 1:
+            try:
+                _wait_for_ssh(target, total_timeout=ssh_recovery_timeout_s, stable_successes=2)
+            except Exception as probe_error:  # pylint: disable=broad-except
+                logger.warning("VM still not serving SSH before retry %d (%s)", attempt, probe_error)
+        try:
+            return target.execute_async(binary_path, **kwargs)
+        except Exception as ex:  # pylint: disable=broad-except
+            last_error = ex
+            logger.warning("Launching %s failed on attempt %d/%d (%s)", binary_path, attempt, attempts, ex)
+    raise last_error
+
+
+def stop_quietly(process, label: str = ""):
+    """Best-effort ``QemuAsyncProcess.stop()`` that never raises.
+
+    ``stop()`` delivers ``kill`` over yet another fresh SSH connection, so it can fail exactly
+    like a launch can. It only runs once the test is already abandoning the VM, so a failure
+    here must not replace the real outcome with an SSH error.
+    """
+    try:
+        process.stop()
+    except Exception as ex:  # pylint: disable=broad-except
+        logger.warning("Could not stop remote process %s cleanly (%s)", label, ex)
+
+
 class DualQemuProcess(QemuProcess):
     """A :class:`QemuProcess` subclass with ivshmem support and self-healing boot.
 
