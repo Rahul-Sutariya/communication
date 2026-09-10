@@ -25,6 +25,8 @@ Both apps print "verified" on success.
 import logging
 import time
 
+from dual_qemu import execute_async_with_retries, stop_quietly
+
 logger = logging.getLogger(__name__)
 
 APP1 = "/opt/qemu_transport_test/bin/app1"
@@ -46,8 +48,8 @@ def _collect_result(label, process):
 def test_qemu_ivshmem_transport(target_a, target_b):
     """Bidirectional: VM-A writes service_a and reads service_b; VM-B writes service_b and reads service_a."""
     processes = {
-        VM_A_LABEL: target_a.execute_async(APP1),
-        VM_B_LABEL: target_b.execute_async(APP2),
+        VM_A_LABEL: execute_async_with_retries(target_a, APP1),
+        VM_B_LABEL: execute_async_with_retries(target_b, APP2),
     }
     results = {}
     deadline = time.monotonic() + TIMEOUT_SECONDS
@@ -57,14 +59,14 @@ def test_qemu_ivshmem_transport(target_a, target_b):
                 results[label] = _collect_result(label, process)
                 del processes[label]
                 if results[label][0] != 0:
-                    for peer_process in processes.values():
-                        peer_process.stop()
+                    for peer_label, peer_process in processes.items():
+                        stop_quietly(peer_process, peer_label)
                     break
         time.sleep(0.1)
 
     if processes:
-        for process in processes.values():
-            process.stop()
+        for label, process in processes.items():
+            stop_quietly(process, label)
         raise TimeoutError(f"Timed out after {TIMEOUT_SECONDS}s waiting for: {list(processes)}")
 
     rc_a, text_a = results[VM_A_LABEL]

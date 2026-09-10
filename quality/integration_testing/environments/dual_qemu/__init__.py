@@ -13,13 +13,17 @@
 """Pytest plugin that boots **two** QNX QEMU VMs sharing a QEMU ``ivshmem`` region.
 
 It is a thin extension of the single-VM ``qemu`` plugin
-(``@score_itf//score/itf/plugins/qemu``): it reuses ``QemuTarget`` / ``pre_tests_phase``
-and only adds (a) a second VM, (b) an ``ivshmem-plain`` device backed by one shared host
-file, and (c) distinct host SSH ports per VM.
+(``@score_itf//score/itf/plugins/qemu``): it reuses ``QemuTarget`` and only adds (a) a second
+VM, (b) an ``ivshmem-plain`` device backed by one shared host file, and (c) distinct host SSH
+ports per VM.
 
 Exposed session fixtures:
     - ``target_a`` / ``target_b`` -- the two booted VMs (``QemuTarget``).
     - ``ivshmem_backend``         -- path of the shared host backing file.
+
+Also re-exports ``execute_async_with_retries`` / ``stop_quietly``, which tests should prefer
+over the raw ``QemuTarget`` calls because each of those opens a fresh, failure-prone SSH
+connection to this guest.
 """
 
 import logging
@@ -30,7 +34,9 @@ import pytest
 from score.itf.core.utils.bunch import Bunch
 
 from .config import load_configuration, parse_size
-from .dual_qemu_process import DualQemuProcess
+from .dual_qemu_process import DualQemuProcess, execute_async_with_retries, stop_quietly
+
+__all__ = ["execute_async_with_retries", "stop_quietly"]
 
 logger = logging.getLogger(__name__)
 
