@@ -30,23 +30,36 @@ from .ivshmem_qemu import IvshmemQemu
 
 logger = logging.getLogger(__name__)
 
+# "echo ready" answers in ~15 ms on a healthy guest, so anything near this is a wedged one.
+_READINESS_EXEC_TIMEOUT_S = 15
+
 
 def _wait_for_ssh(target, total_timeout: int = 180, interval: int = 3, stable_successes: int = 3):
     """Wait until the VM *stably* serves SSH.
 
-    Early-boot sshd is briefly unstable, so require several consecutive successes to
-    avoid the ``pre_tests_phase`` (5 retries) failing in that window. Reuse one SSH
-    connection for the consecutive checks because this guest can fail to accept a new
-    connection while an existing one is open.
+    Early-boot sshd is briefly unstable, so require several consecutive successes before
+    calling the VM usable. Reuse one SSH connection for those checks because this guest can
+    fail to accept a new connection while an existing one is open.
+
+    ``echo ready`` gets an explicit short timeout rather than score_itf's 30s-start/180s-run
+    defaults: a wedged guest accepts the connection and authenticates but then never runs the
+    command at all, and on those defaults one such probe burns most of ``total_timeout``,
+    leaving the loop barely any retries inside a single boot attempt.
     """
     deadline = time.monotonic() + total_timeout
     last_error = None
+    connected = False
     while time.monotonic() < deadline:
         consecutive = 0
         try:
             with target.ssh(timeout=10, n_retries=1, retry_interval=1) as ssh:
+                connected = True
                 while consecutive < stable_successes:
-                    return_code = ssh.execute_command("echo ready")
+                    return_code = ssh.execute_command(
+                        "echo ready",
+                        timeout=_READINESS_EXEC_TIMEOUT_S,
+                        max_exec_time=_READINESS_EXEC_TIMEOUT_S,
+                    )
                     if return_code != 0:
                         last_error = RuntimeError(f"SSH readiness command failed with exit code {return_code}")
                         break
@@ -57,6 +70,11 @@ def _wait_for_ssh(target, total_timeout: int = 180, interval: int = 3, stable_su
         except Exception as ex:  # pylint: disable=broad-except
             last_error = ex
         time.sleep(interval)
+    if connected:
+        raise TimeoutError(
+            f"VM accepted SSH but never completed 'echo ready' within {total_timeout}s; sshd "
+            f"authenticates but cannot serve a session: {last_error}"
+        )
     raise TimeoutError(f"VM never became stably reachable via SSH within {total_timeout}s: {last_error}")
 
 
