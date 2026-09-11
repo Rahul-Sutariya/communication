@@ -107,10 +107,10 @@ def _readiness_session(ssh_ctx, stable_successes: int, interval: int):
 
 def _wait_for_ssh(
     target,
-    total_timeout: int = 120,
-    interval: int = 3,
-    stable_successes: int = 2,
-    connect_timeout: int = 10,
+    total_timeout: int = 180,
+    interval: int = 1,
+    stable_successes: int = 1,
+    poll_interval: float = 0.5,
 ):
     """Wait until the VM *stably* serves SSH, without hanging on or leaking a session."""
     deadline = time.monotonic() + total_timeout

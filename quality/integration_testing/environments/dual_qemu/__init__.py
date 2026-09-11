@@ -136,9 +136,6 @@ def _targets(config, ivshmem_backend):
             vm_index=1,
             cpu=dual_config.qemu_cpu,
         ) as process_b:
-            # Either VM may have gone quiet while the other booted, and healing one idles
-            # the other for a whole boot, so this probes and re-probes until both are up.
-            ensure_all_responsive([process_a, process_b])
             yield [process_a.target, process_b.target]
 
 
