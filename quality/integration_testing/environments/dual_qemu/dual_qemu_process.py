@@ -20,6 +20,7 @@ process up to ``max_boot_attempts`` times if sshd never comes up.
 """
 
 import logging
+import socket
 import time
 
 from score.itf.plugins.qemu.qemu_process import QemuProcess
@@ -30,39 +31,34 @@ from .ivshmem_qemu import IvshmemQemu
 logger = logging.getLogger(__name__)
 
 
-def _wait_for_ssh(
-    target,
+def _wait_for_sshd_banner(
+    host_port: int,
     total_timeout: int = 180,
-    interval: int = 1,
-    stable_successes: int = 1,
     poll_interval: float = 0.5,
 ):
-    """Wait until the VM *stably* serves SSH.
+    """Wait until sshd inside the VM is accepting TCP connections and serves the SSH banner.
 
-    Early-boot sshd is briefly unstable, so require several consecutive successes to
-    avoid the ``pre_tests_phase`` (5 retries) failing in that window. Reuse one SSH
-    connection for the consecutive checks because this guest can fail to accept a new
-    connection while an existing one is open.
+    Connects via raw TCP socket and checks for the SSH protocol identification string
+    (e.g., b"SSH-2.0-..."). This avoids opening a full SSH/Paramiko session during boot,
+    preventing SSH session churn and 'Connection reset by peer' / 'No existing session' errors.
     """
     deadline = time.monotonic() + total_timeout
     last_error = None
     while time.monotonic() < deadline:
-        consecutive = 0
         try:
-            with target.ssh(timeout=10, n_retries=1, retry_interval=1) as ssh:
-                while consecutive < stable_successes:
-                    return_code = ssh.execute_command("echo ready")
-                    if return_code != 0:
-                        last_error = RuntimeError(f"SSH readiness command failed with exit code {return_code}")
-                        break
-                    consecutive += 1
-                    if consecutive >= stable_successes:
-                        return
-                    time.sleep(interval)
+            with socket.create_connection(("127.0.0.1", host_port), timeout=1.0) as sock:
+                sock.settimeout(2.0)
+                sock.sendall(b"SSH-2.0-score-itf-readiness\r\n")
+                banner = sock.recv(64)
+                if banner.startswith(b"SSH-"):
+                    return
+                last_error = RuntimeError(f"Unexpected banner received on port {host_port}: {banner!r}")
         except Exception as ex:  # pylint: disable=broad-except
             last_error = ex
-        time.sleep(interval)
-    raise TimeoutError(f"VM never became stably reachable via SSH within {total_timeout}s: {last_error}")
+        time.sleep(poll_interval)
+    raise TimeoutError(
+        f"VM sshd never served SSH protocol banner on port {host_port} within {total_timeout}s: {last_error}"
+    )
 
 
 class DualQemuProcess(QemuProcess):
@@ -123,7 +119,7 @@ class DualQemuProcess(QemuProcess):
             super().start()
             try:
                 self._target = QemuTarget(self, self._vm_config)
-                _wait_for_ssh(self._target, total_timeout=self._boot_timeout)
+                _wait_for_sshd_banner(self._vm_config.ssh_port, total_timeout=self._boot_timeout)
                 return self
             except Exception as ex:  # pylint: disable=broad-except
                 last_error = ex
@@ -144,10 +140,10 @@ class DualQemuProcess(QemuProcess):
             f"VM never booted into a usable state after {self._max_boot_attempts} attempts: {last_error}"
         )
 
-    def is_responsive(self, timeout: int = 60, stable_successes: int = 2) -> bool:
-        """Read-only SSH reachability probe (no restart); safe to run concurrently for both VMs."""
+    def is_responsive(self, timeout: int = 60) -> bool:
+        """Read-only TCP reachability probe (no restart); safe to run concurrently for both VMs."""
         try:
-            _wait_for_ssh(self._target, total_timeout=timeout, stable_successes=stable_successes)
+            _wait_for_sshd_banner(self._vm_config.ssh_port, total_timeout=timeout)
             return True
         except TimeoutError:
             return False
