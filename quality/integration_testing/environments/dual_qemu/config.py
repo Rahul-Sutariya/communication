@@ -59,11 +59,17 @@ class DualQemuConfigModel(BaseModel):
     ivshmem: IvshmemConfig = Field(default_factory=IvshmemConfig)
     intervm_network: InterVmNetwork = Field(default_factory=InterVmNetwork)
     # Guest CPU model for both VMs. score_itf hardcodes "Cascadelake-Server-v5" and reads no
-    # configuration, so on a host lacking those Intel features QEMU silently strips them and
-    # the guest CPUID ends up depending on which runner picked up the job. "Nehalem" is old
-    # enough that every x86_64 host supports it in full, so every run sees the same CPU. Set
-    # this to "max" instead to get the host's full feature set at the cost of that determinism.
-    qemu_cpu: str = "Nehalem"
+    # configuration, so on a host lacking those Intel features QEMU silently strips them --
+    # 5 warnings per launch on one CI runner, 14 (all of AVX-512 included) on another.
+    # "max" takes whatever the accelerator offers, so nothing is requested that isn't there.
+    # Do NOT substitute an older fixed model to get determinism instead: QNX 8 does not boot
+    # on one. "Nehalem" hung 15/15 launches straight after SeaBIOS, never reaching "Loading
+    # IFS". "host" is equivalent to "max" under KVM but hard-errors when QEMU falls back to
+    # TCG, which -accel kvm -accel tcg allows.
+    qemu_cpu: str = "max"
+    # When True, dynamically allocates free host ports for SSH forwarding per VM to avoid port
+    # collisions.
+    auto_ssh_ports: bool = True
     vms: list[QemuConfigModel] = Field(min_length=2, max_length=2)
 
 
