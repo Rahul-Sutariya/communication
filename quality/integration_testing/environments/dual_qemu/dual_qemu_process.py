@@ -15,12 +15,13 @@
 Subclasses ``QemuProcess`` and replaces its internal ``_qemu`` with an
 :class:`IvshmemQemu` instance so the VM is launched with an ``ivshmem-plain`` device.
 
-The ``start()`` method is self-healing: it waits for stable SSH and restarts the QEMU
-process up to ``max_boot_attempts`` times if sshd never comes up.
+The ``start()`` method is self-healing: it gates on a serial-console boot marker, verifies
+SSH once, and restarts the QEMU process up to ``max_boot_attempts`` times if either fails.
 """
 
 import concurrent.futures
 import logging
+import threading
 import time
 
 from score.itf.plugins.qemu.qemu_process import QemuProcess
@@ -32,50 +33,120 @@ logger = logging.getLogger(__name__)
 
 # "echo ready" answers in ~15 ms on a healthy guest, so anything near this is a wedged one.
 _READINESS_EXEC_TIMEOUT_S = 15
+# QemuTarget.execute_async connects, opens a channel and reads a PID; seconds on a healthy guest.
+_LAUNCH_TIMEOUT_S = 90
+# How long an abandoned SSH worker gets to unwind after its client has been closed.
+_CANCEL_GRACE_S = 5
+# Printed by startup.sh once sshd has bound port 22; see qnx8_qemu/init_x86_64.build.
+BOOT_COMPLETE_MARKER = "S-CORE BOOT COMPLETE"
 
 
-def _wait_for_ssh(target, total_timeout: int = 180, interval: int = 3, stable_successes: int = 3):
-    """Wait until the VM *stably* serves SSH.
+def _call_with_watchdog(func, timeout: float, on_timeout=None):
+    """Run ``func`` on a worker thread and give up on it after ``timeout`` seconds.
 
-    Early-boot sshd is briefly unstable, so require several consecutive successes before
-    calling the VM usable. Reuse one SSH connection for those checks because this guest can
-    fail to accept a new connection while an existing one is open.
-
-    ``echo ready`` gets an explicit short timeout rather than score_itf's 30s-start/180s-run
-    defaults: a wedged guest accepts the connection and authenticates but then never runs the
-    command at all, and on those defaults one such probe burns most of ``total_timeout``,
-    leaving the loop barely any retries inside a single boot attempt.
+    paramiko waits on an *un-timed* ``Event`` for the server's reply to a channel-open or
+    exec request, so neither score_itf's ``timeout``/``max_exec_time`` nor paramiko's own
+    ``settimeout`` bound it. A guest that accepts TCP and authenticates but can no longer
+    spawn a session therefore blocks the caller forever -- in CI that consumed the whole
+    bazel test timeout on a single ``echo ready``. ``on_timeout`` closes the SSH client,
+    which sets the event the worker is parked on so it can unwind.
     """
-    deadline = time.monotonic() + total_timeout
-    last_error = None
-    connected = False
-    while time.monotonic() < deadline:
-        consecutive = 0
+    outcome = {}
+
+    def _run():
         try:
-            with target.ssh(timeout=10, n_retries=1, retry_interval=1) as ssh:
-                connected = True
-                while consecutive < stable_successes:
-                    return_code = ssh.execute_command(
-                        "echo ready",
-                        timeout=_READINESS_EXEC_TIMEOUT_S,
-                        max_exec_time=_READINESS_EXEC_TIMEOUT_S,
-                    )
-                    if return_code != 0:
-                        last_error = RuntimeError(f"SSH readiness command failed with exit code {return_code}")
-                        break
-                    consecutive += 1
-                    if consecutive >= stable_successes:
-                        return
-                    time.sleep(interval)
+            outcome["value"] = func()
+        except BaseException as ex:  # pylint: disable=broad-except
+            outcome["error"] = ex
+
+    worker = threading.Thread(target=_run, name="dual-qemu-ssh", daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        if on_timeout is not None:
+            try:
+                on_timeout()
+            except Exception:  # pylint: disable=broad-except
+                logger.debug("Could not cancel the stuck SSH operation", exc_info=True)
+        worker.join(_CANCEL_GRACE_S)
+        raise TimeoutError(f"SSH operation did not complete within {timeout:.0f}s")
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["value"]
+
+
+def _readiness_session(ssh_ctx, stable_successes: int, interval: int):
+    """Open one SSH session and run ``echo ready`` ``stable_successes`` times over it.
+
+    Reuse a single connection for all checks: each fresh connection is an extra pre-auth
+    slot on the guest's sshd, and early-boot sshd is exactly when those are scarcest.
+    """
+    try:
+        ssh = ssh_ctx.__enter__()
+    except Exception:
+        # score_itf's Ssh.__enter__ retries connect() on one SSHClient and never closes it
+        # after giving up, leaving a connected but unauthenticated socket on the guest.
+        # Those accumulate until sshd's MaxStartups starts resetting *new* connections,
+        # which is what makes a merely slow VM look permanently dead.
+        ssh_ctx.__exit__(None, None, None)
+        raise
+    try:
+        for check in range(stable_successes):
+            if check:
+                time.sleep(interval)
+            return_code = ssh.execute_command(
+                "echo ready",
+                timeout=_READINESS_EXEC_TIMEOUT_S,
+                max_exec_time=_READINESS_EXEC_TIMEOUT_S,
+            )
+            if return_code != 0:
+                raise RuntimeError(f"SSH readiness command failed with exit code {return_code}")
+    finally:
+        ssh_ctx.__exit__(None, None, None)
+
+
+def _wait_for_ssh(
+    target,
+    total_timeout: int = 120,
+    interval: int = 3,
+    stable_successes: int = 2,
+    connect_timeout: int = 10,
+):
+    """Wait until the VM *stably* serves SSH, without hanging on or leaking a session."""
+    deadline = time.monotonic() + total_timeout
+    attempt_budget = connect_timeout + stable_successes * (interval + _READINESS_EXEC_TIMEOUT_S)
+    last_error = None
+    while True:
+        ssh_ctx = target.ssh(timeout=connect_timeout, n_retries=1, retry_interval=1)
+        budget = max(min(attempt_budget, deadline - time.monotonic()), 1)
+        try:
+            _call_with_watchdog(
+                lambda: _readiness_session(ssh_ctx, stable_successes, interval),
+                budget,
+                on_timeout=lambda: ssh_ctx.__exit__(None, None, None),
+            )
+            return
         except Exception as ex:  # pylint: disable=broad-except
             last_error = ex
+        if time.monotonic() + interval >= deadline:
+            break
         time.sleep(interval)
-    if connected:
-        raise TimeoutError(
-            f"VM accepted SSH but never completed 'echo ready' within {total_timeout}s; sshd "
-            f"authenticates but cannot serve a session: {last_error}"
-        )
     raise TimeoutError(f"VM never became stably reachable via SSH within {total_timeout}s: {last_error}")
+
+
+def _wait_for_boot_marker(console, timeout: int):
+    """Block until the guest prints :data:`BOOT_COMPLETE_MARKER` on its serial console.
+
+    This is the primary boot gate and it costs the guest nothing: probing sshd to find out
+    whether sshd is up is self-defeating, because every failed probe occupies a pre-auth
+    connection slot and pushes a merely slow guest towards refusing connections outright.
+    The marker is printed only after sshd has bound port 22, so one SSH check suffices
+    afterwards instead of a poll loop.
+    """
+    if console is None:
+        return
+    if not console.line_reader.read_until(BOOT_COMPLETE_MARKER, timeout=timeout):
+        raise TimeoutError(f"Guest never reported '{BOOT_COMPLETE_MARKER}' on serial within {timeout}s")
 
 
 def execute_async_with_retries(target, binary_path, attempts: int = 3, ssh_recovery_timeout_s: int = 30, **kwargs):
@@ -86,6 +157,9 @@ def execute_async_with_retries(target, binary_path, attempts: int = 3, ssh_recov
     surfaces as ``SSH connection ... failed`` or ``EOFError`` from ``exec_command``. Both abort
     before the remote shell reports its PID, so there is no process handle left to reclaim and
     waiting for sshd to settle before dialling again is the cheapest recovery.
+
+    It also opens its channel without a timeout, so it is wrapped in the same watchdog as the
+    readiness probe to keep a wedged guest from stalling the test until bazel kills it.
     """
     last_error = None
     for attempt in range(1, attempts + 1):
@@ -95,7 +169,7 @@ def execute_async_with_retries(target, binary_path, attempts: int = 3, ssh_recov
             except Exception as probe_error:  # pylint: disable=broad-except
                 logger.warning("VM still not serving SSH before retry %d (%s)", attempt, probe_error)
         try:
-            return target.execute_async(binary_path, **kwargs)
+            return _call_with_watchdog(lambda: target.execute_async(binary_path, **kwargs), _LAUNCH_TIMEOUT_S)
         except Exception as ex:  # pylint: disable=broad-except
             last_error = ex
             logger.warning("Launching %s failed on attempt %d/%d (%s)", binary_path, attempt, attempts, ex)
@@ -170,7 +244,8 @@ class DualQemuProcess(QemuProcess):
         intervm=None,
         vm_index=0,
         max_boot_attempts=3,
-        boot_timeout=180,
+        boot_timeout=120,
+        ssh_timeout=60,
         cpu=None,
     ):
         super().__init__(
@@ -199,16 +274,18 @@ class DualQemuProcess(QemuProcess):
         self._vm_config = vm_config
         self._max_boot_attempts = max_boot_attempts
         self._boot_timeout = boot_timeout
+        self._ssh_timeout = ssh_timeout
         self._target = None
 
     def start(self):
-        """Boot the VM, retrying up to ``max_boot_attempts`` times if sshd never serves."""
+        """Boot the VM, retrying up to ``max_boot_attempts`` times if it never becomes usable."""
         last_error = None
         for attempt in range(1, self._max_boot_attempts + 1):
             super().start()
             try:
+                _wait_for_boot_marker(self.console, self._boot_timeout)
                 self._target = QemuTarget(self, self._vm_config)
-                _wait_for_ssh(self._target, total_timeout=self._boot_timeout)
+                _wait_for_ssh(self._target, total_timeout=self._ssh_timeout)
                 return self
             except Exception as ex:  # pylint: disable=broad-except
                 last_error = ex
@@ -229,7 +306,7 @@ class DualQemuProcess(QemuProcess):
             f"VM never booted into a usable state after {self._max_boot_attempts} attempts: {last_error}"
         )
 
-    def is_responsive(self, timeout: int = 60, stable_successes: int = 2) -> bool:
+    def is_responsive(self, timeout: int = 45, stable_successes: int = 2) -> bool:
         """Read-only SSH reachability probe; never restarts, so it is safe to run concurrently."""
         try:
             _wait_for_ssh(self._target, total_timeout=timeout, stable_successes=stable_successes)
