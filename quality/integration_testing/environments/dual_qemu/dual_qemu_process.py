@@ -21,6 +21,7 @@ SSH once, and restarts the QEMU process up to ``max_boot_attempts`` times if eit
 
 import concurrent.futures
 import logging
+import socket
 import threading
 import time
 
@@ -105,33 +106,34 @@ def _readiness_session(ssh_ctx, stable_successes: int, interval: int):
         ssh_ctx.__exit__(None, None, None)
 
 
-def _wait_for_ssh(
-    target,
-    total_timeout: int = 180,
-    interval: int = 1,
-    stable_successes: int = 1,
-    poll_interval: float = 0.5,
+def _wait_for_sshd_banner(
+    host_port: int,
+    total_timeout: int = 280,
+    poll_interval: float = 10,
 ):
-    """Wait until the VM *stably* serves SSH, without hanging on or leaking a session."""
+    """Wait until sshd inside the VM is accepting TCP connections and serves the SSH banner.
+
+    Connects via raw TCP socket and checks for the SSH protocol identification string
+    (e.g., b"SSH-2.0-..."). This avoids opening a full SSH/Paramiko session during boot,
+    preventing SSH session churn and 'Connection reset by peer' / 'No existing session' errors.
+    """
     deadline = time.monotonic() + total_timeout
-    attempt_budget = connect_timeout + stable_successes * (interval + _READINESS_EXEC_TIMEOUT_S)
     last_error = None
-    while True:
-        ssh_ctx = target.ssh(timeout=connect_timeout, n_retries=1, retry_interval=1)
-        budget = max(min(attempt_budget, deadline - time.monotonic()), 1)
+    while time.monotonic() < deadline:
         try:
-            _call_with_watchdog(
-                lambda: _readiness_session(ssh_ctx, stable_successes, interval),
-                budget,
-                on_timeout=lambda: ssh_ctx.__exit__(None, None, None),
-            )
-            return
+            with socket.create_connection(("127.0.0.1", host_port), timeout=1.0) as sock:
+                sock.settimeout(9.0)
+                time.sleep(poll_interval)
+                banner = sock.recv(64)
+                if banner.startswith(b"SSH-"):
+                    return
+                last_error = RuntimeError(f"Unexpected banner received on port {host_port}: {banner!r}")
         except Exception as ex:  # pylint: disable=broad-except
             last_error = ex
-        if time.monotonic() + interval >= deadline:
-            break
-        time.sleep(interval)
-    raise TimeoutError(f"VM never became stably reachable via SSH within {total_timeout}s: {last_error}")
+        time.sleep(poll_interval)
+    raise TimeoutError(
+        f"VM sshd never served SSH protocol banner on port {host_port} within {total_timeout}s: {last_error}"
+    )
 
 
 def _wait_for_boot_marker(console, timeout: int):
@@ -285,7 +287,7 @@ class DualQemuProcess(QemuProcess):
             try:
                 _wait_for_boot_marker(self.console, self._boot_timeout)
                 self._target = QemuTarget(self, self._vm_config)
-                _wait_for_ssh(self._target, total_timeout=self._ssh_timeout)
+                _wait_for_sshd_banner(self._vm_config.ssh_port, total_timeout=self._boot_timeout)
                 return self
             except Exception as ex:  # pylint: disable=broad-except
                 last_error = ex
@@ -306,10 +308,10 @@ class DualQemuProcess(QemuProcess):
             f"VM never booted into a usable state after {self._max_boot_attempts} attempts: {last_error}"
         )
 
-    def is_responsive(self, timeout: int = 45, stable_successes: int = 2) -> bool:
-        """Read-only SSH reachability probe; never restarts, so it is safe to run concurrently."""
+    def is_responsive(self, timeout: int = 60) -> bool:
+        """Read-only TCP reachability probe (no restart); safe to run concurrently for both VMs."""
         try:
-            _wait_for_ssh(self._target, total_timeout=timeout, stable_successes=stable_successes)
+            _wait_for_sshd_banner(self._vm_config.ssh_port, total_timeout=timeout)
             return True
         except TimeoutError:
             return False

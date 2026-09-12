@@ -26,6 +26,7 @@ over the raw ``QemuTarget`` calls because each of those opens a fresh, failure-p
 connection to this guest.
 """
 
+import concurrent.futures
 import logging
 import socket
 
@@ -136,6 +137,12 @@ def _targets(config, ivshmem_backend):
             vm_index=1,
             cpu=dual_config.qemu_cpu,
         ) as process_b:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                healthy_a, healthy_b = pool.map(lambda p: p.is_responsive(), [process_a, process_b])
+            if not healthy_a:
+                process_a.self_heal()
+            if not healthy_b:
+                process_b.self_heal()
             yield [process_a.target, process_b.target]
 
 
