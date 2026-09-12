@@ -31,6 +31,25 @@ from .ivshmem_qemu import IvshmemQemu
 logger = logging.getLogger(__name__)
 
 
+def _wait_for_ssh(
+    target,
+    total_timeout: int = 180,
+    interval: float = 1.0,
+):
+    """Wait for one complete SSH session without creating session churn."""
+    deadline = time.monotonic() + total_timeout
+    last_error = None
+    while time.monotonic() < deadline:
+        try:
+            with target.ssh(timeout=100, n_retries=1, retry_interval=1) as ssh:
+                if ssh.execute_command("echo ready") == 0:
+                    return
+        except Exception as ex:  # pylint: disable=broad-except
+            last_error = ex
+        time.sleep(interval)
+    raise TimeoutError(f"VM never became reachable via SSH within {total_timeout}s: {last_error}")
+
+
 def _wait_for_sshd_banner(
     host_port: int,
     total_timeout: int = 180,
@@ -129,7 +148,7 @@ class DualQemuProcess(QemuProcess):
             super().start()
             try:
                 self._target = QemuTarget(self, self._vm_config)
-                _wait_for_sshd_banner(self._vm_config.ssh_port, total_timeout=self._boot_timeout)
+                _wait_for_ssh(self._target, total_timeout=self._boot_timeout)
                 return self
             except Exception as ex:  # pylint: disable=broad-except
                 last_error = ex
