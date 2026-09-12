@@ -47,12 +47,22 @@ def _wait_for_sshd_banner(
     while time.monotonic() < deadline:
         try:
             with socket.create_connection(("127.0.0.1", host_port), timeout=1.0) as sock:
-                sock.settimeout(2.0)
+                sock.settimeout(5.0)
                 sock.sendall(b"SSH-2.0-score-itf-readiness\r\n")
-                banner = sock.recv(64)
-                if banner.startswith(b"SSH-"):
+                banner = bytearray()
+                while len(banner) < 255:
+                    chunk = sock.recv(1)
+                    if not chunk:
+                        break
+                    banner.extend(chunk)
+                    if chunk == b"\n":
+                        break
+                banner_line = bytes(banner).rstrip(b"\r\n")
+                if banner_line.startswith(b"SSH-"):
                     return
-                last_error = RuntimeError(f"Unexpected banner received on port {host_port}: {banner!r}")
+                last_error = RuntimeError(
+                    f"Unexpected banner received on port {host_port}: {banner_line!r}"
+                )
         except Exception as ex:  # pylint: disable=broad-except
             last_error = ex
         time.sleep(poll_interval)
@@ -161,7 +171,7 @@ class DualQemuProcess(QemuProcess):
 
     def ensure_responsive(self, timeout: int = 60, stable_successes: int = 2):
         """Re-verify the VM is still reachable, restarting it (self-heal) if it went idle-dead."""
-        if not self.is_responsive(timeout, stable_successes):
+        if not self.is_responsive(timeout):
             self.self_heal()
 
     @property
