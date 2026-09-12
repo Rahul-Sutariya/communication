@@ -15,14 +15,14 @@
 Subclasses ``QemuProcess`` and replaces its internal ``_qemu`` with an
 :class:`IvshmemQemu` instance so the VM is launched with an ``ivshmem-plain`` device.
 
-The ``start()`` method is self-healing: it waits for stable SSH, runs ``pre_tests_phase``,
-and restarts the QEMU process up to ``max_boot_attempts`` times if sshd never comes up.
+The ``start()`` method is self-healing: it waits for stable SSH and restarts the QEMU
+process up to ``max_boot_attempts`` times if sshd never comes up.
 """
 
 import logging
+import socket
 import time
 
-from score.itf.plugins.qemu.checks import pre_tests_phase
 from score.itf.plugins.qemu.qemu_process import QemuProcess
 from score.itf.plugins.qemu.qemu_target import QemuTarget
 
@@ -31,30 +31,83 @@ from .ivshmem_qemu import IvshmemQemu
 logger = logging.getLogger(__name__)
 
 
-def _wait_for_ssh(target, total_timeout: int = 180, interval: int = 3, stable_successes: int = 3):
-    """Wait until the VM *stably* serves SSH.
+def _wait_for_sshd_banner(
+    host_port: int,
+    total_timeout: int = 180,
+    poll_interval: float = 0.5,
+):
+    """Wait until sshd inside the VM is accepting TCP connections and serves the SSH banner.
 
-    Early-boot sshd is briefly unstable, so require several consecutive successes to
-    avoid the ``pre_tests_phase`` (5 retries) failing in that window.
+    Connects via raw TCP socket and checks for the SSH protocol identification string
+    (e.g., b"SSH-2.0-..."). This avoids opening a full SSH/Paramiko session during boot,
+    preventing SSH session churn and 'Connection reset by peer' / 'No existing session' errors.
     """
     deadline = time.monotonic() + total_timeout
     last_error = None
-    consecutive = 0
+    time.sleep(poll_interval+15)
     while time.monotonic() < deadline:
         try:
-            with target.ssh(timeout=10, n_retries=1, retry_interval=1) as ssh:
-                if ssh.execute_command("echo ready") == 0:
-                    consecutive += 1
-                    if consecutive >= stable_successes:
-                        return
-                    time.sleep(interval)
-                    continue
-            consecutive = 0
+            with socket.create_connection(("127.0.0.1", host_port), timeout=1.0) as sock:
+                sock.settimeout(5.0)
+                time.sleep(poll_interval+5)
+                sock.sendall(b"SSH-2.0-score-itf-readiness\r\n")
+                banner = bytearray()
+                while len(banner) < 255:
+                    chunk = sock.recv(1)
+                    if not chunk:
+                        break
+                    banner.extend(chunk)
+                    if chunk == b"\n":
+                        break
+                banner_line = bytes(banner).rstrip(b"\r\n")
+                if banner_line.startswith(b"SSH-"):
+                    return
+                last_error = RuntimeError(
+                    f"Unexpected banner received on port {host_port}: {banner_line!r}"
+                )
         except Exception as ex:  # pylint: disable=broad-except
             last_error = ex
-            consecutive = 0
-        time.sleep(interval)
-    raise TimeoutError(f"VM never became stably reachable via SSH within {total_timeout}s: {last_error}")
+        time.sleep(poll_interval)
+    raise TimeoutError(
+        f"VM sshd never served SSH protocol banner on port {host_port} within {total_timeout}s: {last_error}"
+    )
+
+
+def execute_async_with_retries(target, binary_path, attempts: int = 3, ssh_recovery_timeout_s: int = 30, **kwargs):
+    """Launch ``binary_path`` on ``target``, retrying if the SSH session collapses.
+
+    ``QemuTarget.execute_async`` opens a *brand-new* SSH connection per launch, and this guest
+    can refuse or drop one shortly after serving another (see ``_wait_for_ssh``); in CI that
+    surfaces as ``SSH connection ... failed`` or ``EOFError`` from ``exec_command``. Both abort
+    before the remote shell reports its PID, so there is no process handle left to reclaim and
+    waiting for sshd to settle before dialling again is the cheapest recovery.
+    """
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        if attempt > 1:
+            try:
+                _wait_for_ssh(target, total_timeout=ssh_recovery_timeout_s, stable_successes=2)
+            except Exception as probe_error:  # pylint: disable=broad-except
+                logger.warning("VM still not serving SSH before retry %d (%s)", attempt, probe_error)
+        try:
+            return target.execute_async(binary_path, **kwargs)
+        except Exception as ex:  # pylint: disable=broad-except
+            last_error = ex
+            logger.warning("Launching %s failed on attempt %d/%d (%s)", binary_path, attempt, attempts, ex)
+    raise last_error
+
+
+def stop_quietly(process, label: str = ""):
+    """Best-effort ``QemuAsyncProcess.stop()`` that never raises.
+
+    ``stop()`` delivers ``kill`` over yet another fresh SSH connection, so it can fail exactly
+    like a launch can. It only runs once the test is already abandoning the VM, so a failure
+    here must not replace the real outcome with an SSH error.
+    """
+    try:
+        process.stop()
+    except Exception as ex:  # pylint: disable=broad-except
+        logger.warning("Could not stop remote process %s cleanly (%s)", label, ex)
 
 
 class DualQemuProcess(QemuProcess):
@@ -79,24 +132,31 @@ class DualQemuProcess(QemuProcess):
         intervm=None,
         vm_index=0,
         max_boot_attempts=3,
-        boot_timeout=100,
+        boot_timeout=180,
+        cpu=None,
     ):
         super().__init__(
             path_to_qemu_image,
             available_ram,
             available_cores,
+            network_adapters=[],
             port_forwarding=port_forwarding,
+            machine=vm_config.qemu_machine,
+            rootfs=None,
+            kernel_cmdline=vm_config.qemu_kernel_cmdline,
         )
         # Replace the base's default Qemu with our ivshmem-capable subclass.
         self._qemu = IvshmemQemu(
             path_to_qemu_image,
             available_ram,
             available_cores,
+            network_adapters=[],
             port_forwarding=port_forwarding,
             ivshmem_path=ivshmem_path,
             ivshmem_size=ivshmem_size,
             intervm=intervm,
             vm_index=vm_index,
+            cpu=cpu,
         )
         self._vm_config = vm_config
         self._max_boot_attempts = max_boot_attempts
@@ -110,8 +170,7 @@ class DualQemuProcess(QemuProcess):
             super().start()
             try:
                 self._target = QemuTarget(self, self._vm_config)
-                _wait_for_ssh(self._target, total_timeout=self._boot_timeout)
-                pre_tests_phase(self._target)
+                _wait_for_sshd_banner(self._vm_config.ssh_port, total_timeout=self._boot_timeout)
                 return self
             except Exception as ex:  # pylint: disable=broad-except
                 last_error = ex
@@ -125,17 +184,36 @@ class DualQemuProcess(QemuProcess):
                     self.stop()
                 except Exception:  # pylint: disable=broad-except
                     logger.exception("Failed to stop the wedged QEMU before retrying")
+                if attempt < self._max_boot_attempts:
+                    logger.info("Waiting 5 s before next boot attempt to let resources settle")
+                    time.sleep(5)
         raise RuntimeError(
             f"VM never booted into a usable state after {self._max_boot_attempts} attempts: {last_error}"
         )
 
-    def ensure_responsive(self, timeout: int = 30, stable_successes: int = 2):
-        """Re-verify the VM is still reachable; restart in place if not."""
+    def is_responsive(self, timeout: int = 60) -> bool:
+        """Read-only TCP reachability probe (no restart); safe to run concurrently for both VMs."""
         try:
-            _wait_for_ssh(self._target, total_timeout=timeout, stable_successes=stable_successes)
-        except Exception as ex:  # pylint: disable=broad-except
-            logger.warning("VM went unresponsive (%s); restarting", ex)
-            self.restart()
+            _wait_for_sshd_banner(self._vm_config.ssh_port, total_timeout=timeout)
+            return True
+        except TimeoutError:
+            return False
+
+    def self_heal(self):
+        """Restart the VM, reusing start()'s own boot-retry + readiness-check loop.
+
+        A VM that already passed ``start()`` can still stop serving sshd while it sits idle during
+        the peer's boot; one restart recovers it without needing a full outer Bazel retry, which
+        would reboot both VMs from scratch.
+        """
+        logger.warning("VM went unresponsive; restarting to self-heal")
+        self.stop()
+        self.start()
+
+    def ensure_responsive(self, timeout: int = 60, stable_successes: int = 2):
+        """Re-verify the VM is still reachable, restarting it (self-heal) if it went idle-dead."""
+        if not self.is_responsive(timeout):
+            self.self_heal()
 
     @property
     def target(self):

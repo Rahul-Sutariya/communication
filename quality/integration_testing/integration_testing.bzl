@@ -223,8 +223,11 @@ def dual_qemu_integration_test(
     # Two VMs require even more resources than a single one.
     if "size" not in kwargs:
         kwargs["size"] = "enormous"
+
+    # Dual-QEMU boots two guests and can fall back to slower TCG in CI, so give
+    # it more wall-clock budget than a single-VM integration test.
     if "timeout" not in kwargs:
-        kwargs["timeout"] = "moderate"
+        kwargs["timeout"] = "long"
 
     # Driving two real QNX guests under KVM has rare, environment-induced boot
     # nondeterminism (e.g. a guest occasionally wedging during device bring-up).
@@ -236,10 +239,13 @@ def dual_qemu_integration_test(
     # This test is intentionally marked flaky (above) to retry environment-induced
     # QEMU boot hiccups, so exclude it from the nightly flaky-test detection to
     # avoid reporting expected, infrastructure-level nondeterminism.
+    #
+    # "exclusive": serializes execution on the same machine so two VM pairs never
+    # compete for CPU.
     _extend_list_in_kwargs_without_duplicates(
         kwargs,
         "tags",
-        ["no-flaky-test-detection"],
+        ["no-flaky-test-detection", "exclusive"],
     )
 
     _extend_list_in_kwargs_without_duplicates(
