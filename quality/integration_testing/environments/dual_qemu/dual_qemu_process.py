@@ -44,10 +44,12 @@ def _wait_for_sshd_banner(
     """
     deadline = time.monotonic() + total_timeout
     last_error = None
+    time.sleep(poll_interval+15)
     while time.monotonic() < deadline:
         try:
             with socket.create_connection(("127.0.0.1", host_port), timeout=1.0) as sock:
                 sock.settimeout(5.0)
+                time.sleep(poll_interval+5)
                 sock.sendall(b"SSH-2.0-score-itf-readiness\r\n")
                 banner = bytearray()
                 while len(banner) < 255:
