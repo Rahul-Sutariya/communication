@@ -108,6 +108,11 @@
     # SSH daemon - ITF test harness communicates via SSH
     echo "---> Starting SSH daemon"
     /proc/boot/sshd -f /var/ssh/sshd_config
+
+    # sshd binds and listens on port 22 before it daemonizes, so reaching this line means
+    # the guest is ready. The harness gates on this marker instead of polling sshd, which
+    # would burn pre-auth connection slots while sshd is still coming up.
+    echo "---> S-CORE BOOT COMPLETE"
 }
 
 # dynamic loader
@@ -408,9 +413,15 @@ HostbasedAuthentication no
 PermitRootLogin yes
 PermitUserEnvironment yes
 PidFile none
-LogLevel DEBUG
+LogLevel INFO
 StrictModes no
 UseDNS no
 MaxAuthTries 3
 LoginGraceTime 30
+
+# The harness reconnects often and paramiko can leave half-open pre-auth connections behind.
+# On the default 10:30:100 those trip the rate limiter, after which sshd resets *new*
+# connections and a merely slow VM looks permanently dead.
+MaxStartups 64:30:128
+MaxSessions 32
 }

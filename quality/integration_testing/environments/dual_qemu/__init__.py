@@ -13,15 +13,20 @@
 """Pytest plugin that boots **two** QNX QEMU VMs sharing a QEMU ``ivshmem`` region.
 
 It is a thin extension of the single-VM ``qemu`` plugin
-(``@score_itf//score/itf/plugins/qemu``): it reuses ``QemuTarget`` / ``pre_tests_phase``
-and only adds (a) a second VM, (b) an ``ivshmem-plain`` device backed by one shared host
-file, and (c) distinct host SSH ports per VM.
+(``@score_itf//score/itf/plugins/qemu``): it reuses ``QemuTarget`` and only adds (a) a second
+VM, (b) an ``ivshmem-plain`` device backed by one shared host file, and (c) distinct host SSH
+ports per VM.
 
 Exposed session fixtures:
     - ``target_a`` / ``target_b`` -- the two booted VMs (``QemuTarget``).
     - ``ivshmem_backend``         -- path of the shared host backing file.
+
+Also re-exports ``execute_async_with_retries`` / ``stop_quietly``, which tests should prefer
+over the raw ``QemuTarget`` calls because each of those opens a fresh, failure-prone SSH
+connection to this guest.
 """
 
+import concurrent.futures
 import logging
 import socket
 
@@ -30,7 +35,14 @@ import pytest
 from score.itf.core.utils.bunch import Bunch
 
 from .config import load_configuration, parse_size
-from .dual_qemu_process import DualQemuProcess
+from .dual_qemu_process import (
+    DualQemuProcess,
+    ensure_all_responsive,
+    execute_async_with_retries,
+    stop_quietly,
+)
+
+__all__ = ["execute_async_with_retries", "stop_quietly"]
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +123,7 @@ def _targets(config, ivshmem_backend):
         ivshmem_size=dual_config.ivshmem.size,
         intervm=intervm_roles[0],
         vm_index=0,
+        cpu=dual_config.qemu_cpu,
     ) as process_a:
         with DualQemuProcess(
             config.qemu_images[1],
@@ -122,9 +135,14 @@ def _targets(config, ivshmem_backend):
             ivshmem_size=dual_config.ivshmem.size,
             intervm=intervm_roles[1],
             vm_index=1,
+            cpu=dual_config.qemu_cpu,
         ) as process_b:
-            # Re-verify VM-A is still responsive (it may have gone quiet while VM-B booted).
-            process_a.ensure_responsive()
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+                healthy_a, healthy_b = pool.map(lambda p: p.is_responsive(), [process_a, process_b])
+            if not healthy_a:
+                process_a.self_heal()
+            if not healthy_b:
+                process_b.self_heal()
             yield [process_a.target, process_b.target]
 
 
