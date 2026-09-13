@@ -33,16 +33,16 @@ logger = logging.getLogger(__name__)
 
 def _wait_for_ssh(
     target,
-    total_timeout: int = 180,
+    total_timeout: int = 360,
     interval: float = 5.0,
 ):
     """Wait for one complete SSH session without creating session churn."""
     deadline = time.monotonic() + total_timeout
     last_error = None
-    time.sleep(interval+5)
     while time.monotonic() < deadline:
         try:
-            with target.ssh(timeout=100, n_retries=1, retry_interval=1) as ssh:
+            with target.ssh(timeout=150, n_retries=1, retry_interval=1) as ssh:
+                time.sleep(0.5)
                 if ssh.execute_command("echo ready") == 0:
                     return
         except Exception as ex:  # pylint: disable=broad-except
