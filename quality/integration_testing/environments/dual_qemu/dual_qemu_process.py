@@ -108,8 +108,8 @@ def _readiness_session(ssh_ctx, stable_successes: int, interval: int):
 
 def _wait_for_sshd_banner(
     host_port: int,
-    total_timeout: int = 180,
-    poll_interval: float = 2,
+    total_timeout: int = 300,
+    poll_interval: float = 5.0,
 ):
     """Wait until sshd inside the VM is accepting TCP connections and serves the SSH banner.
 
@@ -119,17 +119,32 @@ def _wait_for_sshd_banner(
     """
     deadline = time.monotonic() + total_timeout
     last_error = None
+    time.sleep(1.0)
+    deadline = time.monotonic() + 300
+
     while time.monotonic() < deadline:
         try:
-            with socket.create_connection(("127.0.0.1", host_port), timeout=1.0) as sock:
-                sock.settimeout(60.0)
+            with socket.create_connection(
+                ("127.0.0.1", host_port),
+                timeout=10.0,
+            ) as sock:
+                time.sleep(5.0)
+
+                remaining = deadline - time.monotonic()
+                sock.settimeout(min(60.0, max(0.1, remaining)))
+
                 banner = sock.recv(64)
+
                 if banner.startswith(b"SSH-"):
                     return
-                last_error = RuntimeError(f"Unexpected banner received on port {host_port}: {banner!r}")
-        except Exception as ex:  # pylint: disable=broad-except
+
+                last_error = RuntimeError(
+                    f"Unexpected banner: {banner!r}"
+                )
+
+        except Exception as ex:
             last_error = ex
-        time.sleep(poll_interval)
+        time.sleep(5.0)
     raise TimeoutError(
         f"VM sshd never served SSH protocol banner on port {host_port} within {total_timeout}s: {last_error}"
     )
