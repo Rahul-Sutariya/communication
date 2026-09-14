@@ -19,6 +19,7 @@ Both VMs run QemuHypervisorTransport simultaneously as source and destination:
 The handshake uses the last page of the ivshmem BAR with a phased protocol.
 Both apps print "verified" on success.
 """
+
 import logging
 import threading
 import time
