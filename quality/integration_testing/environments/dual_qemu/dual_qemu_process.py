@@ -43,7 +43,7 @@ def _wait_for_ssh(target, total_timeout: int = 180, interval: int = 3, stable_su
     while time.monotonic() < deadline:
         consecutive = 0
         try:
-            with target.ssh(timeout=10, n_retries=1, retry_interval=1) as ssh:
+            with target.ssh(timeout=100, n_retries=1, retry_interval=1) as ssh:
                 while consecutive < stable_successes:
                     return_code = ssh.execute_command("echo ready")
                     if return_code != 0:
@@ -81,7 +81,7 @@ class DualQemuProcess(QemuProcess):
         intervm=None,
         vm_index=0,
         max_boot_attempts=3,
-        boot_timeout=180,
+        boot_timeout=300,
     ):
         super().__init__(
             path_to_qemu_image,
