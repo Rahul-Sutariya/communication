@@ -30,7 +30,7 @@ from .ivshmem_qemu import IvshmemQemu
 logger = logging.getLogger(__name__)
 
 
-def _wait_for_ssh(target, total_timeout: int = 180, interval: int = 3, stable_successes: int = 3):
+def _wait_for_ssh(target, total_timeout: int = 240, interval: int = 3, stable_successes: int = 3):
     """Wait until the VM *stably* serves SSH.
 
     Early-boot sshd is briefly unstable, so require several consecutive successes to
@@ -43,7 +43,7 @@ def _wait_for_ssh(target, total_timeout: int = 180, interval: int = 3, stable_su
     while time.monotonic() < deadline:
         consecutive = 0
         try:
-            with target.ssh(timeout=100, n_retries=1, retry_interval=1) as ssh:
+            with target.ssh(timeout=60, n_retries=1, retry_interval=1) as ssh:
                 while consecutive < stable_successes:
                     return_code = ssh.execute_command("echo ready")
                     if return_code != 0:
