@@ -43,7 +43,7 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _wait_for_ssh(target, total_timeout: int = 120, interval: int = 10, stable_successes: int = 2):
+def _wait_for_ssh(target, total_timeout: int = 240, interval: int = 10, stable_successes: int = 2):
     """Wait until the VM *stably* serves SSH.
 
     Reuses a single connection across the consecutive checks instead of reconnecting every
@@ -56,7 +56,7 @@ def _wait_for_ssh(target, total_timeout: int = 120, interval: int = 10, stable_s
     while time.monotonic() < deadline:
         consecutive = 0
         try:
-            with target.ssh(timeout=ssh_probe_timeout, n_retries=1, retry_interval=1) as ssh:
+            with target.ssh(timeout=60, n_retries=1, retry_interval=2) as ssh:
                 while consecutive < stable_successes:
                     if ssh.execute_command("echo ready") != 0:
                         break
