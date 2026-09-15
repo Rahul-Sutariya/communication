@@ -13,7 +13,7 @@
 """Pytest plugin that boots **two** QNX QEMU VMs sharing a QEMU ``ivshmem`` region.
 
 It is a thin extension of the single-VM ``qemu`` plugin
-(``@score_itf//score/itf/plugins/qemu``): it reuses ``QemuTarget`` / ``pre_tests_phase``
+(``@score_itf//score/itf/plugins/qemu``): it reuses ``QemuTarget``
 and only adds (a) a second VM, (b) an ``ivshmem-plain`` device backed by one shared host
 file, and (c) distinct host SSH ports per VM.
 
@@ -30,7 +30,14 @@ import pytest
 from score.itf.core.utils.bunch import Bunch
 
 from .config import load_configuration, parse_size
-from .dual_qemu_process import DualQemuProcess
+from .dual_qemu_process import (
+    DualQemuProcess,
+    execute_async_with_retries,
+    stop_quietly,
+)
+
+# Helpers used by tests that launch applications over SSH.
+__all__ = ["execute_async_with_retries", "stop_quietly"]
 
 logger = logging.getLogger(__name__)
 
@@ -123,8 +130,6 @@ def _targets(config, ivshmem_backend):
             intervm=intervm_roles[1],
             vm_index=1,
         ) as process_b:
-            # Re-verify VM-A is still responsive (it may have gone quiet while VM-B booted).
-            process_a.ensure_responsive()
             yield [process_a.target, process_b.target]
 
 
