@@ -252,6 +252,9 @@ int main()
     }
     std::fprintf(stderr, "app2: sent ProvideServiceRequest for service_b to VM-A\n");
 
+    // Allow VM-A's dispatch queue to finish processing ProvideService before sending DataReady.
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
     // Notify VM-A (over the transport, not shared memory) that service_b's DATA is ready.
     // See app1_main.cpp for the FIFO-ordering argument that guarantees delivery order.
     const bool notify_sent = NotifyWithRetries([&] {

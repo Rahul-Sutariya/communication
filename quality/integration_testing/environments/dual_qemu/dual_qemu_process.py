@@ -99,6 +99,7 @@ def _wait_for_ssh(target, total_timeout: int = 180, interval: int = 1, stable_su
     connection for the consecutive checks because this guest can fail to accept a new
     connection while an existing one is open.
     """
+    time.sleep(5)
     deadline = time.monotonic() + total_timeout
     last_error = None
     while time.monotonic() < deadline:

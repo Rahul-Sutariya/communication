@@ -65,7 +65,7 @@ def test_qemu_ivshmem_transport(target_a, target_b):
                         results[peer_label] = _collect_result(peer_label, peer_process)
                         del processes[peer_label]
                     break
-        time.sleep(0.1)
+        time.sleep(1.0)
 
     if processes:
         for label, process in processes.items():

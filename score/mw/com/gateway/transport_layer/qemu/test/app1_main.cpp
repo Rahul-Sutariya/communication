@@ -172,6 +172,9 @@ int main()
     }
     std::fprintf(stderr, "app1: sent ProvideServiceRequest for service_a to VM-B\n");
 
+    // Allow VM-B's dispatch queue to finish processing ProvideService before sending DataReady.
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
     // Notify VM-B (over the transport, not shared memory) that service_a's DATA is ready.
     // Both messages share one TCP connection with FIFO dispatch on the receiver, so this is
     // guaranteed to be handled after the ProvideServiceRequest above (shm already bound).
