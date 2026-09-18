@@ -142,24 +142,133 @@ jobs:
             disk-cache: ${{ inputs.fetch_only != 'true' && 'build_and_test_qnx' || '' }}
             cache-mode: ${{ inputs.cache_mode }}
             ubuntu-snapshot-mirror-url: ${{ secrets.UBUNTU_SNAPSHOT_MIRROR_URL }}
+        - name: Report CI resources
+          run: |
+            exec > >(tee ci-resource-report.log) 2>&1
+            echo "===== CPU ====="
+            nproc
+            lscpu
+
+            echo "===== RAM ====="
+            free -h
+
+            echo "===== DISK ====="
+            df -h
+
+            echo "===== CPU FREQUENCY ====="
+            grep -E "model name|cpu MHz" /proc/cpuinfo | head -20
+
+            echo "===== LOAD ====="
+            uptime
+
+            echo "===== CPU STATISTICS ====="
+            cat /proc/loadavg
+            cat /proc/stat | head -6
+            echo "CPU iowait/steal fields are the 5th/8th fields in /proc/stat"
+            awk '$1 == "cpu" {print "iowait=" $6, "steal=" $9}' /proc/stat
+            vmstat 1 2
+
+            echo "===== DISK I/O COUNTERS ====="
+            cat /proc/diskstats
+
+            echo "===== MEMORY PRESSURE ====="
+            cat /proc/pressure/memory 2>/dev/null || true
+            cat /proc/pressure/io 2>/dev/null || true
+
+            echo "===== CGROUP LIMITS ====="
+            echo "--- /proc/self/cgroup"
+            cat /proc/self/cgroup
+            for file in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/cpu.stat /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.current /sys/fs/cgroup/cpu/cpu.cfs_quota_us /sys/fs/cgroup/cpu/cpu.cfs_period_us /sys/fs/cgroup/memory/memory.limit_in_bytes /sys/fs/cgroup/memory/memory.usage_in_bytes; do
+              if [ -f "$file" ]; then
+                echo "--- $file"
+                cat "$file"
+              fi
+            done
+
+            echo "===== NETWORK ====="
+            ip -details link
+            ss -s
         - name: Build QNX
           if: inputs.fetch_only != 'true'
           env:
             SCORE_QNX_USER: ${{ secrets.SCORE_QNX_USER }}
             SCORE_QNX_PASSWORD: ${{ secrets.SCORE_QNX_PASSWORD }}
           run: bazel build --config=ci --config=qnx -- //score/...
+        - name: Monitor resources during tests
+          if: inputs.fetch_only != 'true'
+          run: |
+            : > ci-resource-monitor.log
+            (
+              while true; do
+                {
+                  date
+                  uptime
+                  free -h
+                  cat /proc/pressure/cpu 2>/dev/null || true
+                  cat /proc/pressure/memory 2>/dev/null || true
+                  cat /proc/pressure/io 2>/dev/null || true
+                  awk '$1 == "cpu" {print "iowait=" $6, "steal=" $9}' /proc/stat
+                  vmstat 1 2
+                  if command -v mpstat >/dev/null 2>&1; then mpstat -P ALL 1 2; fi
+                  if command -v pidstat >/dev/null 2>&1; then pidstat -d -u -w 1 2; fi
+                  echo "diskstats:"
+                  cat /proc/diskstats
+                  ps -eo pid,ppid,%cpu,%mem,rss,etime,cmd --sort=-%cpu | head -20
+                  ps -eo pid,ppid,%cpu,%mem,rss,etime,cmd | grep -E '[q]emu-system|[b]azel|[p]ython' || true
+                  echo "cgroup cpu.stat:"
+                  cat /sys/fs/cgroup/cpu.stat 2>/dev/null || true
+                  echo "cgroup memory.current/max:"
+                  cat /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.max 2>/dev/null || true
+                  cat /sys/fs/cgroup/memory/memory.usage_in_bytes /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || true
+                  echo "network sockets:"
+                  ss -tnp 2>/dev/null || true
+                  echo "----------------------------------------"
+                } >> ci-resource-monitor.log 2>&1
+                sleep 10
+              done
+            ) &
+            echo $! > resource-monitor.pid
         - name: Test QNX
           if: inputs.fetch_only != 'true'
           id: run-tests
           env:
             SCORE_QNX_USER: ${{ secrets.SCORE_QNX_USER }}
             SCORE_QNX_PASSWORD: ${{ secrets.SCORE_QNX_PASSWORD }}
-          run: bazel test --config=ci --config=qnx -- //score/...
+          run: |
+            echo "TEST_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a ci-resource-monitor.log
+            set +e
+            bazel test --config=ci --config=qnx -- //score/...
+            test_status=$?
+            set -e
+            echo "TEST_END=$(date -u +%Y-%m-%dT%H:%M:%SZ) STATUS=$test_status" | tee -a ci-resource-monitor.log
+            exit "$test_status"
         - name: Upload failed Bazel test logs
           if: inputs.fetch_only != 'true' && failure() && steps.run-tests.outcome == 'failure'
           uses: ./.github/actions/00_infrastructure/upload_bazel_testlogs_on_failure
           with:
             artifact-name: bazel-testlogs-qnx
+        - name: Stop resource monitor
+          if: always()
+          run: |
+            if [ -f resource-monitor.pid ]; then
+              monitor_pid="$(cat resource-monitor.pid)"
+              kill "$monitor_pid" 2>/dev/null || true
+              wait "$monitor_pid" 2>/dev/null || true
+            fi
+            echo "FINAL_SNAPSHOT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> ci-resource-monitor.log
+            uptime >> ci-resource-monitor.log
+            free -h >> ci-resource-monitor.log
+            cat /proc/pressure/cpu /proc/pressure/memory /proc/pressure/io >> ci-resource-monitor.log 2>/dev/null || true
+            cat /sys/fs/cgroup/cpu.stat >> ci-resource-monitor.log 2>/dev/null || true
+        - name: Upload CI resource reports
+          if: always() && inputs.fetch_only != 'true'
+          uses: actions/upload-artifact@v4
+          with:
+            name: qnx-ci-resource-reports
+            path: |
+              ci-resource-report.log
+              ci-resource-monitor.log
+            if-no-files-found: ignore
         - name: Fetch dependencies (--nobuild)
           if: inputs.fetch_only == 'true'
           env:
