@@ -197,7 +197,6 @@ jobs:
         - name: Monitor resources during tests
           if: inputs.fetch_only != 'true'
           run: |
-            : > ci-resource-monitor.log
             (
               while true; do
                 {
@@ -209,8 +208,6 @@ jobs:
                   cat /proc/pressure/io 2>/dev/null || true
                   awk '$1 == "cpu" {print "iowait=" $6, "steal=" $9}' /proc/stat
                   vmstat 1 2
-                  if command -v mpstat >/dev/null 2>&1; then mpstat -P ALL 1 2; fi
-                  if command -v pidstat >/dev/null 2>&1; then pidstat -d -u -w 1 2; fi
                   echo "diskstats:"
                   cat /proc/diskstats
                   ps -eo pid,ppid,%cpu,%mem,rss,etime,cmd --sort=-%cpu | head -20
@@ -255,11 +252,6 @@ jobs:
               kill "$monitor_pid" 2>/dev/null || true
               wait "$monitor_pid" 2>/dev/null || true
             fi
-            echo "FINAL_SNAPSHOT=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> ci-resource-monitor.log
-            uptime >> ci-resource-monitor.log
-            free -h >> ci-resource-monitor.log
-            cat /proc/pressure/cpu /proc/pressure/memory /proc/pressure/io >> ci-resource-monitor.log 2>/dev/null || true
-            cat /sys/fs/cgroup/cpu.stat >> ci-resource-monitor.log 2>/dev/null || true
         - name: Upload CI resource reports
           if: always() && inputs.fetch_only != 'true'
           uses: actions/upload-artifact@v4
