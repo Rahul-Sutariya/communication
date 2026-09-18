@@ -113,8 +113,11 @@ def _wait_for_ssh(target, total_timeout: int = 180, interval: int = 1, stable_su
                         break
                     consecutive += 1
                     if consecutive >= stable_successes:
-                        return
+                        break
                     time.sleep(interval)
+            if consecutive >= stable_successes:
+                time.sleep(1)
+                return
         except Exception as ex:  # pylint: disable=broad-except
             last_error = ex
         time.sleep(interval)
@@ -132,6 +135,7 @@ def execute_async_with_retries(
     last_error = None
     for attempt in range(1, attempts + 1):
         if attempt > 1:
+            time.sleep(2)
             try:
                 _wait_for_ssh(
                     target,
@@ -155,6 +159,7 @@ def execute_async_with_retries(
                 attempts,
                 ex,
             )
+            time.sleep(1)
     raise last_error
 
 
