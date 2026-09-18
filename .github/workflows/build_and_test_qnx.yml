@@ -204,10 +204,10 @@ jobs:
             SCORE_QNX_PASSWORD: ${{ secrets.SCORE_QNX_PASSWORD }}
           run: bazel build --config=ci --config=qnx -- //score/...
         - name: Monitor resources during tests
-          if: inputs.fetch_only != 'true'
           run: |
             (
               while true; do
+<<<<<<< HEAD
                 {
                   date
                   uptime
@@ -236,9 +236,16 @@ jobs:
                   ss -tnp 2>/dev/null || true
                   echo "----------------------------------------"
                 } >> ci-resource-monitor.log 2>&1
+=======
+                date
+                uptime
+                free -h
+                ps -eo pid,ppid,%cpu,%mem,rss,etime,cmd --sort=-%cpu | head -20
+                echo "----------------------------------------"
+>>>>>>> 0ad64227 (monitor qnc ci resoureces)
                 sleep 10
               done
-            ) &
+            ) > ci-resource-monitor.log 2>&1 &
             echo $! > resource-monitor.pid
         - name: Test QNX
           if: inputs.fetch_only != 'true'
@@ -262,20 +269,7 @@ jobs:
         - name: Stop resource monitor
           if: always()
           run: |
-            if [ -f resource-monitor.pid ]; then
-              monitor_pid="$(cat resource-monitor.pid)"
-              kill "$monitor_pid" 2>/dev/null || true
-              wait "$monitor_pid" 2>/dev/null || true
-            fi
-        - name: Upload CI resource reports
-          if: always() && inputs.fetch_only != 'true'
-          uses: actions/upload-artifact@v4
-          with:
-            name: qnx-ci-resource-reports
-            path: |
-              ci-resource-report.log
-              ci-resource-monitor.log
-            if-no-files-found: ignore
+            kill "$(cat resource-monitor.pid)" 2>/dev/null || true
         - name: Fetch dependencies (--nobuild)
           if: inputs.fetch_only == 'true'
           env:
