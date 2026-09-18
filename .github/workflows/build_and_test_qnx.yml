@@ -144,7 +144,6 @@ jobs:
             ubuntu-snapshot-mirror-url: ${{ secrets.UBUNTU_SNAPSHOT_MIRROR_URL }}
         - name: Report CI resources
           run: |
-            exec > >(tee ci-resource-report.log) 2>&1
             echo "===== CPU ====="
             nproc
             lscpu
@@ -160,6 +159,7 @@ jobs:
 
             echo "===== LOAD ====="
             uptime
+<<<<<<< HEAD
 
             echo "===== CPU STATISTICS ====="
             cat /proc/loadavg
@@ -195,6 +195,8 @@ jobs:
             echo "===== NETWORK ====="
             ip -details link
             ss -s
+=======
+>>>>>>> 6dd41ac7 (monitor qnc ci resoureces)
         - name: Build QNX
           if: inputs.fetch_only != 'true'
           env:
