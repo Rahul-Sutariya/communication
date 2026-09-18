@@ -591,11 +591,9 @@ TEST_F(BidirectionalTransportSocketFixture, SetupFailsWhenReEstablishingListenSo
 {
     // Given a transport that connects successfully but immediately disconnects (recv returns 0),
     // and after the reconnection delay, re-creating the listen socket fails
-    CreateTransport();
+    CreateTransport(500U);
     EXPECT_CALL(socket_mock_, socket(score::os::Socket::Domain::kIPv4, SOCK_STREAM | SOCK_NONBLOCK, 0))
-        .WillOnce(Return(kListenFd))
-        .WillOnce(Return(score::cpp::expected<std::int32_t, score::os::Error>{
-            score::cpp::make_unexpected(score::os::Error::createFromErrno(EMFILE))}));
+        .WillOnce(Return(kListenFd));
     EXPECT_CALL(socket_mock_, setsockopt(_, _, _, _, _))
         .WillRepeatedly(Return(score::cpp::expected_blank<score::os::Error>{}));
     EXPECT_CALL(socket_mock_, bind(_, _, _)).WillOnce(Return(score::cpp::expected_blank<score::os::Error>{}));
@@ -603,7 +601,8 @@ TEST_F(BidirectionalTransportSocketFixture, SetupFailsWhenReEstablishingListenSo
     EXPECT_CALL(socket_mock_, socket(score::os::Socket::Domain::kIPv4, SOCK_STREAM, 0)).WillOnce(Return(kSendFd));
     EXPECT_CALL(socket_mock_, connect(kSendFd, _, _)).WillOnce(Return(score::cpp::expected_blank<score::os::Error>{}));
     EXPECT_CALL(socket_mock_, accept(kListenFd, _, _)).WillOnce(Return(kReceiveFd));
-    // Immediate disconnect: recv returns 0
+    // Immediate disconnect: recv returns 0; the reconnect path is bounded by the setup timeout and should fail before
+    // attempting a second listen socket rebuild.
     EXPECT_CALL(socket_mock_, recv(kReceiveFd, _, _, _))
         .WillOnce(Return(score::cpp::expected<ssize_t, score::os::Error>{static_cast<ssize_t>(0)}));
 
@@ -654,11 +653,30 @@ TEST_F(BidirectionalTransportSocketFixture, SetupReturnsConnectionFailureWhenShu
     EXPECT_FALSE(transport_->IsConnected());
 }
 
+TEST_F(BidirectionalTransportSocketFixture, SetupFailsWhenPeerNeverConnectsWithinRequestTimeout)
+{
+    // Given a transport whose send socket never connects within the configured request timeout
+    CreateTransport(20U).WithASocketBoundAndListening();
+    EXPECT_CALL(socket_mock_, socket(score::os::Socket::Domain::kIPv4, SOCK_STREAM, 0)).WillRepeatedly(Return(kSendFd));
+    EXPECT_CALL(socket_mock_, connect(_, _, _))
+        .WillRepeatedly(Return(score::cpp::expected_blank<score::os::Error>{
+            score::cpp::make_unexpected(score::os::Error::createFromErrno(ECONNREFUSED))}));
+    EXPECT_CALL(socket_mock_, accept(_, _, _))
+        .WillRepeatedly(Return(score::cpp::expected<std::int32_t, score::os::Error>{
+            score::cpp::make_unexpected(score::os::Error::createFromErrno(EAGAIN))}));
+
+    const auto result = transport_->Setup();
+
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), TransportErrorc::kConnectionFailure);
+    EXPECT_FALSE(transport_->IsConnected());
+}
+
 TEST_F(BidirectionalTransportSocketFixture, SetupRetriesAcceptAfterEagain)
 {
     // Given a transport where accept() on the listening socket returns EAGAIN on the first call and succeeds on the
     // second
-    CreateTransport().WithASocketBoundAndListening().WithAConnectedSendSocket().WithAcceptReturningErrorOnFirstCall(
+    CreateTransport(500U).WithASocketBoundAndListening().WithAConnectedSendSocket().WithAcceptReturningErrorOnFirstCall(
         EAGAIN);
 
     // Block recv to keep connection alive
@@ -689,7 +707,7 @@ TEST_F(BidirectionalTransportSocketFixture, SetupRetriesAcceptAfterEwouldblock)
 {
     // Given a transport where accept() on the listening socket returns EWOULDBLOCK on the first call and succeeds on
     // the second
-    CreateTransport().WithASocketBoundAndListening().WithAConnectedSendSocket().WithAcceptReturningErrorOnFirstCall(
+    CreateTransport(500U).WithASocketBoundAndListening().WithAConnectedSendSocket().WithAcceptReturningErrorOnFirstCall(
         EWOULDBLOCK);
 
     // Block recv to keep connection alive
@@ -720,7 +738,7 @@ TEST_F(BidirectionalTransportSocketFixture, SetupRetriesAcceptAfterTransientErro
 {
     // Given a transport where accept() returns a transient error (ECONNABORTED) on the first call and succeeds on the
     // second
-    CreateTransport().WithASocketBoundAndListening().WithAConnectedSendSocket().WithAcceptReturningErrorOnFirstCall(
+    CreateTransport(500U).WithASocketBoundAndListening().WithAConnectedSendSocket().WithAcceptReturningErrorOnFirstCall(
         ECONNABORTED);
 
     // Block recv to keep connection alive

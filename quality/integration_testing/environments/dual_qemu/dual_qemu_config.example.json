@@ -6,6 +6,7 @@
         "enabled": false,
         "host_port": 12345
     },
+    "boot_settle_seconds": 3,
     "vms": [
         {
             "networks": [

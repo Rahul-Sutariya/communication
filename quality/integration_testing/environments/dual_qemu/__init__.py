@@ -24,6 +24,7 @@ Exposed session fixtures:
 
 import logging
 import socket
+import time
 
 import pytest
 
@@ -138,6 +139,12 @@ def _targets(config, ivshmem_backend):
     ) as process_a:
         if intervm.enabled:
             wait_for_host_port_bound(intervm.host_port)
+        if dual_config.boot_settle_seconds:
+            logger.info(
+                "Waiting %.1f s after VM-A SSH readiness before starting VM-B",
+                dual_config.boot_settle_seconds,
+            )
+            time.sleep(dual_config.boot_settle_seconds)
         with DualQemuProcess(
             config.qemu_images[1],
             vms[1].qemu_ram_size,

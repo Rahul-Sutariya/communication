@@ -41,6 +41,7 @@ To keep the test reliable the plugin:
 - boots the VMs **sequentially** — it starts a VM, waits until SSH is *stably* reachable,
   and only then starts the next one, so the two guests never
   initialise their devices at the same time;
+- waits for `boot_settle_seconds` (3 seconds by default) after VM-A is ready before starting VM-B;
 - gives each VM a single core and a **distinct NIC MAC**;
 - the `dual_qemu_integration_test` macro additionally marks the test `flaky = True` so
   bazel transparently retries the rare residual KVM boot hiccup.
@@ -72,6 +73,7 @@ block:
   is created for the session and removed on teardown.
 - `intervm_network.enabled` — when `true`, adds a socket NIC where VM-A listens and VM-B
   connects on `host_port` (for the future socket control plane).
+- `boot_settle_seconds` — delay after VM-A reaches stable SSH readiness before VM-B boots; use `0` to disable it.
 - Each VM's `ssh_port` and `port_forwarding` must use **distinct host ports**.
 
 ## Cross-VM lib-memory example

@@ -20,7 +20,6 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <poll.h>
 
 #include <cerrno>
 #include <chrono>
@@ -91,15 +90,18 @@ score::Result<void> BidirectionalTransport::Setup()
                                                                      this->DispatchLoop(stop_token);
                                                                  }));
 
-    // we block the connection loop until the first connection is established to ensure that Setup() only returns once
-    // the transport is actually ready to send and receive messages
-    while (!is_connected_ && !threads_.ShutdownRequested())
+    // We block until the first connection is established, but we must fail fast if the peer never connects.
+    const auto setup_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(socket_config_.request_timeout_ms_);
+    while (!is_connected_ && !threads_.ShutdownRequested() && std::chrono::steady_clock::now() < setup_deadline)
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 
     if (!is_connected_)
     {
+        ::score::mw::log::LogError() << "BidirectionalTransport: connection setup timed out after "
+                                     << socket_config_.request_timeout_ms_ << " ms";
         Shutdown();
         return score::MakeUnexpected(TransportErrorc::kConnectionFailure);
     }
@@ -128,53 +130,25 @@ score::Result<void> BidirectionalTransport::SetupSendSocket(score::cpp::stop_tok
     const auto* remote_addr_ptr = reinterpret_cast<const struct sockaddr*>(&remote_addr);
 
     constexpr auto kRetryInterval = std::chrono::milliseconds(50);
-    constexpr int kConnectTimeoutMs = 200;
+    const auto setup_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(socket_config_.request_timeout_ms_);
 
     while (!stop_token.stop_requested())
     {
-        // Set non-blocking on socket so connect() does not block for 75s if peer IP/ARP is not yet ready.
-        const int flags = fcntl(socket.Get(), F_GETFL, 0);
-        if (flags != -1)
+        if (std::chrono::steady_clock::now() >= setup_deadline)
         {
-            fcntl(socket.Get(), F_SETFL, flags | O_NONBLOCK);
+            ::score::mw::log::LogError() << "BidirectionalTransport: connect timed out after "
+                                         << socket_config_.request_timeout_ms_ << " ms";
+            return score::MakeUnexpected(TransportErrorc::kConnectionFailure);
         }
 
         auto connect_result = Socket::instance().connect(socket.Get(), remote_addr_ptr, sizeof(remote_addr));
-        bool connected = false;
-
         if (connect_result.has_value())
         {
-            connected = true;
-        }
-        else if (errno == EINPROGRESS || connect_result.error() == score::os::Error::createFromErrno(EINPROGRESS))
-        {
-            struct pollfd pfd{};
-            pfd.fd = socket.Get();
-            pfd.events = POLLOUT;
-            const int poll_res = poll(&pfd, 1, kConnectTimeoutMs);
-            if (poll_res > 0 && (pfd.revents & POLLOUT))
-            {
-                int so_error = 0;
-                socklen_t len = sizeof(so_error);
-                if (getsockopt(socket.Get(), SOL_SOCKET, SO_ERROR, &so_error, &len) == 0 && so_error == 0)
-                {
-                    connected = true;
-                }
-            }
-        }
-
-        if (connected)
-        {
-            // Restore blocking mode on connected socket.
-            if (flags != -1)
-            {
-                fcntl(socket.Get(), F_SETFL, flags & ~O_NONBLOCK);
-            }
             send_socket_ = std::move(socket);
             return {};
         }
-        // retry indefinitely until stop is requested for any errors, could potentially hang here if the remote side is
-        // never available
+
         score::mw::log::LogDebug() << "BidirectionalTransport: connect failed, retrying in " << kRetryInterval.count()
                                    << " ms: " << connect_result.error().ToString();
         std::this_thread::sleep_for(kRetryInterval);
@@ -275,9 +249,18 @@ bool BidirectionalTransport::WaitForConnection(score::cpp::stop_token stop_token
 {
     struct sockaddr_in client_addr{};
     socklen_t client_len = sizeof(client_addr);
+    const auto setup_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(socket_config_.request_timeout_ms_);
 
     while (!stop_token.stop_requested())
     {
+        if (std::chrono::steady_clock::now() >= setup_deadline)
+        {
+            ::score::mw::log::LogError() << "BidirectionalTransport: accept timed out after "
+                                         << socket_config_.request_timeout_ms_ << " ms";
+            return false;
+        }
+
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast) required by POSIX sockaddr API
         auto accept_result = Socket::instance().accept(
             listen_socket_.Get(), reinterpret_cast<struct sockaddr*>(&client_addr), &client_len);
@@ -297,6 +280,7 @@ bool BidirectionalTransport::WaitForConnection(score::cpp::stop_token stop_token
             {
                 ::score::mw::log::LogError() << "BidirectionalTransport: accept failed";
             }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
             continue;
         }
 
@@ -358,9 +342,10 @@ void BidirectionalTransport::HandleIncomingMessage(std::unique_ptr<TransportMess
         const auto send_ack_result = SendAck(message->GetSequenceNumber());
         if (!send_ack_result.has_value())
         {
+            is_connected_ = false;
+            pending_tracker_->NotifyAll();
             ::score::mw::log::LogWarn() << "BidirectionalTransport: Could not send acknowledgement. Message type: "
                                         << static_cast<int>(message->GetType()) << "," << message->GetSequenceNumber();
-            MarkConnectionBroken();
             return;
         }
     }
@@ -428,13 +413,6 @@ score::Result<void> BidirectionalTransport::SendAck(const std::uint32_t sequence
     return message_framer_->SendMessage(send_socket_.Get(), ack_response);
 }
 
-void BidirectionalTransport::MarkConnectionBroken()
-{
-    is_connected_ = false;
-    // Unblocks a receive thread parked in recv(), which would otherwise keep the dead send socket alive.
-    receive_socket_.ShutdownFd();
-}
-
 score::Result<void> BidirectionalTransport::TrySendAndWaitForAck(TransportMessage& message,
                                                                  const std::uint32_t sequence)
 {
@@ -445,7 +423,6 @@ score::Result<void> BidirectionalTransport::TrySendAndWaitForAck(TransportMessag
         {
             score::mw::log::LogError() << "BidirectionalTransport: failed to send message of type "
                                        << static_cast<int>(message.GetType());
-            MarkConnectionBroken();
             return send_result;
         }
     }
@@ -508,12 +485,13 @@ score::Result<void> BidirectionalTransport::SendNotification(TransportMessage& m
     }
 
     std::lock_guard<std::mutex> lock(send_mutex_);
-    auto send_result = message_framer_->SendMessage(send_socket_.Get(), message);
-    if (!send_result.has_value())
+    auto result = message_framer_->SendMessage(send_socket_.Get(), message);
+    if (!result.has_value())
     {
-        MarkConnectionBroken();
+        is_connected_ = false;
+        pending_tracker_->NotifyAll();
     }
-    return send_result;
+    return result;
 }
 
 void BidirectionalTransport::SetMessageHandler(MessageHandler handler)

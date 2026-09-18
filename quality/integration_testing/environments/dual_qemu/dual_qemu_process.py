@@ -21,6 +21,7 @@ process up to ``max_boot_attempts`` times if sshd never comes up.
 
 import logging
 import socket
+import subprocess
 import time
 
 from score.itf.plugins.qemu.qemu_process import QemuProcess
@@ -91,7 +92,13 @@ def wait_for_host_port_bound(port: int, host: str = "127.0.0.1", timeout_s: int 
     raise TimeoutError(f"QEMU never bound the inter-VM socket {host}:{port} within {timeout_s}s")
 
 
-def _wait_for_ssh(target, total_timeout: int = 180, interval: int = 1, stable_successes: int = 3):
+def _wait_for_ssh(
+    target,
+    total_timeout: int = 180,
+    interval: int = 1,
+    stable_successes: int = 3,
+    max_retry_interval: int = 8,
+):
     """Wait until the VM *stably* serves SSH.
 
     Early-boot sshd is briefly unstable, so require several consecutive successes to
@@ -101,6 +108,7 @@ def _wait_for_ssh(target, total_timeout: int = 180, interval: int = 1, stable_su
     """
     deadline = time.monotonic() + total_timeout
     last_error = None
+    retry_interval = interval
     while time.monotonic() < deadline:
         consecutive = 0
         try:
@@ -116,7 +124,20 @@ def _wait_for_ssh(target, total_timeout: int = 180, interval: int = 1, stable_su
                     time.sleep(interval)
         except Exception as ex:  # pylint: disable=broad-except
             last_error = ex
-        time.sleep(interval)
+        logger.debug("SSH readiness probe failed; retrying in %ss", retry_interval)
+        time.sleep(retry_interval)
+        retry_interval = min(retry_interval * 2, max_retry_interval)
+    logger.warning("SSH timeout host diagnostic timestamp: %s", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    for command in (
+        ["ps", "-eo", "pid,ppid,%cpu,%mem,rss,etime,cmd"],
+        ["ss", "-tnp"],
+        ["ss", "-ltnp"],
+    ):
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
+            logger.warning("SSH timeout host diagnostic (%s):\n%s", " ".join(command), result.stdout.strip())
+        except OSError as ex:
+            logger.warning("Could not collect SSH timeout host diagnostic (%s): %s", " ".join(command), ex)
     raise TimeoutError(f"VM never became stably reachable via SSH within {total_timeout}s: {last_error}")
 
 

@@ -98,9 +98,6 @@ class BidirectionalTransport : public IBidirectionalTransport
     /// \brief Sends ACK for the given sequence number.
     score::Result<void> SendAck(const std::uint32_t sequence);
 
-    /// \brief Marks the connection broken after a send failure so ConnectionLoop rebuilds both sockets.
-    void MarkConnectionBroken();
-
     HyperVisorSocketConfiguration socket_config_;
 
     UniqueSocket send_socket_;
