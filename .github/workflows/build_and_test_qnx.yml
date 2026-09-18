@@ -164,21 +164,28 @@ jobs:
             echo "===== CPU STATISTICS ====="
             cat /proc/loadavg
             cat /proc/stat | head -6
+<<<<<<< HEAD
             echo "CPU iowait/steal fields are the 5th/8th fields in /proc/stat"
             awk '$1 == "cpu" {print "iowait=" $6, "steal=" $9}' /proc/stat
             vmstat 1 2
 
             echo "===== DISK I/O COUNTERS ====="
             cat /proc/diskstats
+=======
+>>>>>>> 4f3a8c54 (monitor qnc ci resoureces)
 
             echo "===== MEMORY PRESSURE ====="
             cat /proc/pressure/memory 2>/dev/null || true
             cat /proc/pressure/io 2>/dev/null || true
 
             echo "===== CGROUP LIMITS ====="
+<<<<<<< HEAD
             echo "--- /proc/self/cgroup"
             cat /proc/self/cgroup
             for file in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/cpu.stat /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.current /sys/fs/cgroup/cpu/cpu.cfs_quota_us /sys/fs/cgroup/cpu/cpu.cfs_period_us /sys/fs/cgroup/memory/memory.limit_in_bytes /sys/fs/cgroup/memory/memory.usage_in_bytes; do
+=======
+            for file in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/cpu.stat /sys/fs/cgroup/memory.max /sys/fs/cgroup/memory.current; do
+>>>>>>> 4f3a8c54 (monitor qnc ci resoureces)
               if [ -f "$file" ]; then
                 echo "--- $file"
                 cat "$file"
@@ -206,17 +213,23 @@ jobs:
                   cat /proc/pressure/cpu 2>/dev/null || true
                   cat /proc/pressure/memory 2>/dev/null || true
                   cat /proc/pressure/io 2>/dev/null || true
+<<<<<<< HEAD
                   awk '$1 == "cpu" {print "iowait=" $6, "steal=" $9}' /proc/stat
                   vmstat 1 2
                   echo "diskstats:"
                   cat /proc/diskstats
+=======
+>>>>>>> 4f3a8c54 (monitor qnc ci resoureces)
                   ps -eo pid,ppid,%cpu,%mem,rss,etime,cmd --sort=-%cpu | head -20
                   ps -eo pid,ppid,%cpu,%mem,rss,etime,cmd | grep -E '[q]emu-system|[b]azel|[p]ython' || true
                   echo "cgroup cpu.stat:"
                   cat /sys/fs/cgroup/cpu.stat 2>/dev/null || true
                   echo "cgroup memory.current/max:"
                   cat /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.max 2>/dev/null || true
+<<<<<<< HEAD
                   cat /sys/fs/cgroup/memory/memory.usage_in_bytes /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || true
+=======
+>>>>>>> 4f3a8c54 (monitor qnc ci resoureces)
                   echo "network sockets:"
                   ss -tnp 2>/dev/null || true
                   echo "----------------------------------------"
