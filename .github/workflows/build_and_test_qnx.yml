@@ -142,6 +142,23 @@ jobs:
             disk-cache: ${{ inputs.fetch_only != 'true' && 'build_and_test_qnx' || '' }}
             cache-mode: ${{ inputs.cache_mode }}
             ubuntu-snapshot-mirror-url: ${{ secrets.UBUNTU_SNAPSHOT_MIRROR_URL }}
+        - name: Report CI resources
+          run: |
+            echo "===== CPU ====="
+            nproc
+            lscpu
+
+            echo "===== RAM ====="
+            free -h
+
+            echo "===== DISK ====="
+            df -h
+
+            echo "===== CPU FREQUENCY ====="
+            grep -E "model name|cpu MHz" /proc/cpuinfo | head -20
+
+            echo "===== LOAD ====="
+            uptime
         - name: Build QNX
           if: inputs.fetch_only != 'true'
           env:
