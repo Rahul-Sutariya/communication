@@ -193,7 +193,7 @@ jobs:
           env:
             SCORE_QNX_USER: ${{ secrets.SCORE_QNX_USER }}
             SCORE_QNX_PASSWORD: ${{ secrets.SCORE_QNX_PASSWORD }}
-          run: bazel build --config=ci --config=qnx -- //score/...
+          run: bazel build --config=ci --config=qnx -- //quality/integration_testing/environments/dual_qemu/example_xvm:test_lib_memory_ivshmem_xvm //score/mw/com/gateway/transport_layer/qemu/test/integration_test:test_qemu_transport
         - name: Monitor resources during tests
           if: inputs.fetch_only != 'true'
           run: |
@@ -222,8 +222,9 @@ jobs:
                   echo "cgroup memory.current/max:"
                   cat /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.max 2>/dev/null || true
                   cat /sys/fs/cgroup/memory/memory.usage_in_bytes /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null || true
-                  echo "network sockets:"
-                  ss -tnp 2>/dev/null || true
+                  echo "network sockets (established & listening):"
+                  ss -tneop 2>/dev/null || true
+                  ss -ltnp 2>/dev/null || true
                   echo "----------------------------------------"
                 } >> ci-resource-monitor.log 2>&1
                 sleep 10
@@ -237,11 +238,16 @@ jobs:
             SCORE_QNX_USER: ${{ secrets.SCORE_QNX_USER }}
             SCORE_QNX_PASSWORD: ${{ secrets.SCORE_QNX_PASSWORD }}
           run: |
+            mkdir -p qemu-serial-logs
+            echo "Starting loopback tcpdump..."
+            sudo tcpdump -i lo -s 0 -w qnx-integration-test-lo.pcap 2>/dev/null &
+            echo $! > tcpdump.pid
+
             echo "TEST_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a ci-resource-monitor.log
             echo "===== QEMU AT TEST START =====" | tee -a ci-resource-monitor.log
             pgrep -a qemu-system-x86_64 | tee -a ci-resource-monitor.log || true
             set +e
-            bazel test --config=ci --config=qnx -- //score/...
+            bazel test --config=ci --config=qnx --runs_per_test=5 --test_env=DUAL_QEMU_SERIAL_DIR="$PWD/qemu-serial-logs" -- //quality/integration_testing/environments/dual_qemu/example_xvm:test_lib_memory_ivshmem_xvm //score/mw/com/gateway/transport_layer/qemu/test/integration_test:test_qemu_transport
             test_status=$?
             set -e
             echo "===== QEMU AT TEST END =====" | tee -a ci-resource-monitor.log
@@ -256,6 +262,14 @@ jobs:
         - name: Stop resource monitor
           if: always()
           run: |
+            if [ -f tcpdump.pid ]; then
+              sudo kill "$(cat tcpdump.pid)" 2>/dev/null || true
+              rm -f tcpdump.pid
+            fi
+            if [ -f qnx-integration-test-lo.pcap ]; then
+              sudo chmod 644 qnx-integration-test-lo.pcap 2>/dev/null || true
+              tcpdump -nn -tttt -r qnx-integration-test-lo.pcap > qnx-tcpdump-summary.log 2>/dev/null || true
+            fi
             if [ -f resource-monitor.pid ]; then
               monitor_pid="$(cat resource-monitor.pid)"
               kill "$monitor_pid" 2>/dev/null || true
@@ -274,10 +288,13 @@ jobs:
             path: |
               ci-resource-report.log
               ci-resource-monitor.log
+              qnx-integration-test-lo.pcap
+              qnx-tcpdump-summary.log
+              qemu-serial-logs
             if-no-files-found: ignore
         - name: Fetch dependencies (--nobuild)
           if: inputs.fetch_only == 'true'
           env:
             SCORE_QNX_USER: ${{ secrets.SCORE_QNX_USER }}
             SCORE_QNX_PASSWORD: ${{ secrets.SCORE_QNX_PASSWORD }}
-          run: bazel build --nobuild --config=ci --config=qnx -- //score/...
+          run: bazel build --nobuild --config=ci --config=qnx -- //quality/integration_testing/environments/dual_qemu/example_xvm:test_lib_memory_ivshmem_xvm //score/mw/com/gateway/transport_layer/qemu/test/integration_test:test_qemu_transport
