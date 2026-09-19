@@ -56,6 +56,7 @@ class DualQemuConfigModel(BaseModel):
 
     ivshmem: IvshmemConfig = Field(default_factory=IvshmemConfig)
     intervm_network: InterVmNetwork = Field(default_factory=InterVmNetwork)
+    boot_settle_seconds: float = Field(default=3.0, ge=0, le=60)
     vms: list[QemuConfigModel] = Field(min_length=2, max_length=2)
 
 

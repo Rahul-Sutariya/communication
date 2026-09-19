@@ -6,6 +6,7 @@
         "enabled": false,
         "host_port": 12345
     },
+    "boot_settle_seconds": 3,
     "vms": [
         {
             "networks": [
@@ -16,7 +17,7 @@
                 }
             ],
             "ssh_port": 2222,
-            "qemu_num_cores": "1",
+            "qemu_num_cores": 2,
             "qemu_ram_size": "1G",
             "port_forwarding": [
                 {
@@ -34,7 +35,7 @@
                 }
             ],
             "ssh_port": 2223,
-            "qemu_num_cores": "1",
+            "qemu_num_cores": 2,
             "qemu_ram_size": "1G",
             "port_forwarding": [
                 {

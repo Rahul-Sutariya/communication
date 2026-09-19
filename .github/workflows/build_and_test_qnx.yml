@@ -201,7 +201,7 @@ jobs:
             (
               while true; do
                 {
-                  date
+                  date -u
                   uptime
                   free -h
                   cat /proc/pressure/cpu 2>/dev/null || true
@@ -213,6 +213,8 @@ jobs:
                   if command -v pidstat >/dev/null 2>&1; then pidstat -d -u -w 1 2; fi
                   echo "diskstats:"
                   cat /proc/diskstats
+                  echo "qemu processes:"
+                  pgrep -a qemu-system-x86_64 || true
                   ps -eo pid,ppid,%cpu,%mem,rss,etime,cmd --sort=-%cpu | head -20
                   ps -eo pid,ppid,%cpu,%mem,rss,etime,cmd | grep -E '[q]emu-system|[b]azel|[p]ython' || true
                   echo "cgroup cpu.stat:"
@@ -242,10 +244,14 @@ jobs:
             echo $! > tcpdump.pid
 
             echo "TEST_START=$(date -u +%Y-%m-%dT%H:%M:%SZ)" | tee -a ci-resource-monitor.log
+            echo "===== QEMU AT TEST START =====" | tee -a ci-resource-monitor.log
+            pgrep -a qemu-system-x86_64 | tee -a ci-resource-monitor.log || true
             set +e
             bazel test --config=ci --config=qnx --runs_per_test=5 --test_env=DUAL_QEMU_SERIAL_DIR="$PWD/qemu-serial-logs" -- //quality/integration_testing/environments/dual_qemu/example_xvm:test_lib_memory_ivshmem_xvm //score/mw/com/gateway/transport_layer/qemu/test/integration_test:test_qemu_transport
             test_status=$?
             set -e
+            echo "===== QEMU AT TEST END =====" | tee -a ci-resource-monitor.log
+            pgrep -a qemu-system-x86_64 | tee -a ci-resource-monitor.log || true
             echo "TEST_END=$(date -u +%Y-%m-%dT%H:%M:%SZ) STATUS=$test_status" | tee -a ci-resource-monitor.log
             exit "$test_status"
         - name: Upload failed Bazel test logs

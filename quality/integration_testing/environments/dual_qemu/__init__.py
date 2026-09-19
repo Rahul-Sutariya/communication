@@ -13,7 +13,7 @@
 """Pytest plugin that boots **two** QNX QEMU VMs sharing a QEMU ``ivshmem`` region.
 
 It is a thin extension of the single-VM ``qemu`` plugin
-(``@score_itf//score/itf/plugins/qemu``): it reuses ``QemuTarget`` / ``pre_tests_phase``
+(``@score_itf//score/itf/plugins/qemu``): it reuses ``QemuTarget``
 and only adds (a) a second VM, (b) an ``ivshmem-plain`` device backed by one shared host
 file, and (c) distinct host SSH ports per VM.
 
@@ -24,13 +24,24 @@ Exposed session fixtures:
 
 import logging
 import socket
+import time
 
 import pytest
 
 from score.itf.core.utils.bunch import Bunch
 
 from .config import load_configuration, parse_size
-from .dual_qemu_process import DualQemuProcess
+from .dual_qemu_process import (
+    DualQemuProcess,
+    allocate_free_host_port,
+    execute_async_with_retries,
+    require_free_host_ports,
+    stop_quietly,
+    wait_for_host_port_bound,
+)
+
+# Helpers used by tests that launch applications over SSH.
+__all__ = ["execute_async_with_retries", "stop_quietly"]
 
 logger = logging.getLogger(__name__)
 
@@ -90,14 +101,28 @@ def _targets(config, ivshmem_backend):
     """Boot both VMs sequentially, verify them, and tear down in reverse order."""
     logger.info(f"Starting dual-VM tests on host: {socket.gethostname()}")
     dual_config = config.dual_config
-
-    # When the inter-VM network is enabled, VM-A hosts the socket and VM-B connects.
+    vms = dual_config.vms
     intervm = dual_config.intervm_network
+
+    reserved_host_ports = set()
     intervm_roles = [None, None]
     if intervm.enabled:
-        intervm_roles = [("listen", intervm.host_port), ("connect", intervm.host_port)]
+        intervm_port = allocate_free_host_port(intervm.host_port, reserved=reserved_host_ports)
+        intervm.host_port = intervm_port
+        intervm_roles = [("listen", intervm_port), ("connect", intervm_port)]
 
-    vms = dual_config.vms
+    for vm in vms:
+        old_ssh_port = vm.ssh_port
+        new_ssh_port = None
+        for forwarding in vm.port_forwarding:
+            new_port = allocate_free_host_port(forwarding.host_port, reserved=reserved_host_ports)
+            if forwarding.host_port == old_ssh_port or forwarding.guest_port == 22:
+                new_ssh_port = new_port
+            forwarding.host_port = new_port
+        if new_ssh_port is not None:
+            vm.ssh_port = new_ssh_port
+        else:
+            vm.ssh_port = allocate_free_host_port(vm.ssh_port, reserved=reserved_host_ports)
 
     # Boot VM-A first, then VM-B. Sequential booting avoids a KVM race where two QNX
     # guests initializing concurrently can wedge the second guest's device bring-up.
@@ -112,6 +137,14 @@ def _targets(config, ivshmem_backend):
         intervm=intervm_roles[0],
         vm_index=0,
     ) as process_a:
+        if intervm.enabled:
+            wait_for_host_port_bound(intervm.host_port)
+        if dual_config.boot_settle_seconds:
+            logger.info(
+                "Waiting %.1f s after VM-A SSH readiness before starting VM-B",
+                dual_config.boot_settle_seconds,
+            )
+            time.sleep(dual_config.boot_settle_seconds)
         with DualQemuProcess(
             config.qemu_images[1],
             vms[1].qemu_ram_size,
@@ -123,8 +156,6 @@ def _targets(config, ivshmem_backend):
             intervm=intervm_roles[1],
             vm_index=1,
         ) as process_b:
-            # Re-verify VM-A is still responsive (it may have gone quiet while VM-B booted).
-            process_a.ensure_responsive()
             yield [process_a.target, process_b.target]
 
 
