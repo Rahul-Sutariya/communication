@@ -98,6 +98,7 @@ def _wait_for_ssh(
     interval: int = 1,
     stable_successes: int = 3,
     max_retry_interval: int = 8,
+    initial_delay: float = 3.0,
 ):
     """Wait until the VM *stably* serves SSH.
 
@@ -106,6 +107,8 @@ def _wait_for_ssh(
     connection for the consecutive checks because this guest can fail to accept a new
     connection while an existing one is open.
     """
+    if initial_delay > 0:
+        time.sleep(initial_delay)
     deadline = time.monotonic() + total_timeout
     last_error = None
     retry_interval = interval
@@ -211,7 +214,7 @@ class DualQemuProcess(QemuProcess):
         ivshmem_size="4M",
         intervm=None,
         vm_index=0,
-        max_boot_attempts=2,
+        max_boot_attempts=4,
         boot_timeout=180,
     ):
         super().__init__(

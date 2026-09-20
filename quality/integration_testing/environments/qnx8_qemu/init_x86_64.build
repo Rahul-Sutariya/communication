@@ -107,7 +107,7 @@
 
     # SSH daemon - ITF test harness communicates via SSH
     echo "---> Starting SSH daemon"
-    /proc/boot/sshd -f /var/ssh/sshd_config
+    /proc/boot/sshd -e -f /var/ssh/sshd_config
 }
 
 # dynamic loader
