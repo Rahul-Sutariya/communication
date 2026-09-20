@@ -108,6 +108,7 @@
     # SSH daemon - ITF test harness communicates via SSH
     echo "---> Starting SSH daemon"
     /proc/boot/sshd -f /var/ssh/sshd_config
+    echo "=== QNX_SYSTEM_READY ==="
 }
 
 # dynamic loader
