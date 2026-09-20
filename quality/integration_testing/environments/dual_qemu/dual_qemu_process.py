@@ -220,12 +220,27 @@ class DualQemuProcess(QemuProcess):
         self._boot_timeout = boot_timeout
         self._target = None
 
+    def wait_for_serial_ready(self, timeout_s: int = 60, marker: str = "=== QNX_SYSTEM_READY ==="):
+        """Wait until QNX serial output emits the boot completion marker."""
+        if self._console and hasattr(self._console, "line_reader"):
+            logger.info("Waiting for QNX serial ready marker %r (timeout %ds)...", marker, timeout_s)
+            found = self._console.line_reader.read_until(marker, timeout=timeout_s)
+            if not found:
+                logger.warning(
+                    "Serial marker %r not observed within %ds; falling back to SSH probe",
+                    marker,
+                    timeout_s,
+                )
+            else:
+                logger.info("Observed QNX serial ready marker %r", marker)
+
     def start(self):
         """Boot the VM, retrying up to ``max_boot_attempts`` times if sshd never serves."""
         last_error = None
         for attempt in range(1, self._max_boot_attempts + 1):
             super().start()
             try:
+                self.wait_for_serial_ready(timeout_s=self._boot_timeout)
                 self._target = QemuTarget(self, self._vm_config)
                 _wait_for_ssh(self._target, total_timeout=self._boot_timeout)
                 return self
